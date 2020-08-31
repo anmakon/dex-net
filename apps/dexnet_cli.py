@@ -379,11 +379,11 @@ class DexNet_cli(object):
         metric_name = self._get_fixed_input(metrics, "metric name")
         if metric_name is None: return True
         
-        try:
-            self.dexnet_api.display_grasps(object_name, gripper_name, metric_name)
-        except Exception as e:
-            print("Display grasps failed: {}".format(str(e)))
-        return True
+        #try:
+        self.dexnet_api.display_grasps(object_name, gripper_name, metric_name)
+        #except Exception as e:
+        #    print("Display grasps failed: {}".format(str(e)))
+        #return True
 
     def set_config(self):
         """ Set fields in default config """

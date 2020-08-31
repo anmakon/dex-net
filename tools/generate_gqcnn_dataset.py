@@ -53,10 +53,11 @@ import time
 
 from autolab_core import Point, RigidTransform, YamlConfig
 import autolab_core.utils as utils
-from gqcnn import Grasp2D
-from gqcnn import Visualizer as vis2d
+from gqcnn.grasping import Grasp2D
+from visualization import Visualizer2D as vis2d
 from meshpy import ObjFile, RenderMode, SceneObject, UniformPlanarWorksurfaceImageRandomVariable
 from perception import CameraIntrinsics, BinaryImage, DepthImage
+import matplotlib.pyplot as plt
 
 from dexnet.constants import READ_ONLY_ACCESS
 from dexnet.database import Hdf5Database
@@ -75,6 +76,11 @@ SEED = 197561
 
 # name of the grasp cache file
 CACHE_FILENAME = 'grasp_cache.pkl'
+
+# Variables for creating a smaller dataset
+CREATE_SUBSET = True
+INDEX_START = 0
+INDEX_END = 2
 
 class GraspInfo(object):
     """ Struct to hold precomputed grasp attributes.
@@ -177,6 +183,9 @@ def generate_gqcnn_dataset(dataset_path,
     # open database
     dataset_names = target_object_keys.keys()
     datasets = [database.dataset(dn) for dn in dataset_names]
+
+    if CREATE_SUBSET:
+        datasets = [dataset.subset(INDEX_START,INDEX_END) for dataset in datasets]
 
     # set target objects
     for dataset in datasets:
@@ -401,17 +410,19 @@ def generate_gqcnn_dataset(dataset_path,
                         d = int(np.ceil(np.sqrt(image_samples_per_stable_pose)))
 
                         # binary
-                        vis2d.figure()
+			fig = plt.figure(figsize=(8,8))
+			fig.suptitle('SEGMASK')
                         for j, render_sample in enumerate(render_samples):
-                            vis2d.subplot(d,d,j+1)
-                            vis2d.imshow(render_sample.renders[RenderMode.SEGMASK].image)
+                            plt.subplot(d,d,j+1)
+                            plt.imshow(render_sample.renders[RenderMode.SEGMASK].image.data)
 
                         # depth table
-                        vis2d.figure()
+			fig = plt.figure(figsize=(8,8))
+			fig.suptitle('DEPTH SCENE')
                         for j, render_sample in enumerate(render_samples):
-                            vis2d.subplot(d,d,j+1)
-                            vis2d.imshow(render_sample.renders[RenderMode.DEPTH_SCENE].image)
-                        vis2d.show()
+                            plt.subplot(d,d,j+1)
+                            plt.imshow(render_sample.renders[RenderMode.DEPTH_SCENE].image.data)
+                        plt.show()
 
                     # tally total amount of data
                     num_grasps = len(candidate_grasps)
@@ -469,31 +480,36 @@ def generate_gqcnn_dataset(dataset_path,
                             if config['vis']['grasp_images']:
                                 grasp_center = Point(depth_im_tf_table.center,
                                                      frame=final_camera_intr.frame)
-                                tf_grasp_2d = Grasp2D(grasp_center, 0,
-                                                      grasp_2d.depth,
-                                                      width=gripper.max_width,
-                                                      camera_intr=final_camera_intr)
 
-                                # plot 2D grasp image
-                                vis2d.figure()
-                                vis2d.subplot(2,2,1)
-                                vis2d.imshow(binary_im)
-                                vis2d.grasp(grasp_2d)
-                                vis2d.subplot(2,2,2)
-                                vis2d.imshow(depth_im_table)
-                                vis2d.grasp(grasp_2d)
-                                vis2d.subplot(2,2,3)
-                                vis2d.imshow(binary_im_tf)
-                                vis2d.grasp(tf_grasp_2d)
-                                vis2d.subplot(2,2,4)
-                                vis2d.imshow(depth_im_tf_table)
-                                vis2d.grasp(tf_grasp_2d)
-                                vis2d.title('Coll Free? %d'%(grasp_info.collision_free))
-                                vis2d.show()
+#                                # plot 2D grasp image
+#                                plt.figure(figsize=(8,8))
+#                                plt.subplot(2,2,1)
+#                                plt.imshow(binary_im.data)
+#                                plt.title('Binary Image')
+#                                
+#                                plt.subplot(2,2,2)
+#                                plt.imshow(depth_im_table.data)
+#
+#                                plt.subplot(2,2,3)
+#                                plt.imshow(binary_im_tf.data)
+#
+#                                plt.subplot(2,2,4)
+#                                plt.imshow(depth_im_tf_table.data)
+#
+#                                plt.title('Coll Free? %d'%(grasp_info.collision_free))
+#                                plt.show()
+#				plt.close()
 
                                 # plot 3D visualization
+
+                                fig = plt.figure()
+                                ax = fig.add_subplot(111, projection='3d')
+                                print(obj.mesh.trimesh.faces)
+				ax.plot_trisurf(obj.mesh.trimesh.vertices[:,0],obj.mesh.trimesh.vertices[:,1],obj.mesh.trimesh.vertices[:,2])
+				plt.show()
+
                                 vis.figure()
-                                T_obj_world = vis.mesh_stable_pose(obj.mesh, stable_pose.T_obj_world, style='surface', dim=0.5)
+                                T_obj_world = vis.mesh_stable_pose(obj.mesh.trimesh, stable_pose.T_obj_world, style='surface', dim=0.5)
                                 vis.gripper(gripper, grasp, T_obj_world, color=(0.3,0.3,0.3))
                                 vis.show()
 
