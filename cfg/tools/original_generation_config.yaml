@@ -1,13 +1,20 @@
 # Dex-Net Database params
-database_name: data/dexnet_2_database.hdf5
+database_name: data/example.hdf5
 
 # Dataset params
 gripper: yumi_metal_spline
 
 # Target objects
 target_objects:
-  3dnet: all
-  kit: all
+  mini_dexnet:
+    - bar_clamp
+    - gearbox
+    - nozzle
+    - part1
+    - part3
+    - pawn
+    - turbine_housing
+    - vase
 
 # Params for random variables controlling the environment (camera intr, camera and object poses)
 env_rv_params:
@@ -92,7 +99,7 @@ tensors:
 
 # Debugging params
 vis:
-  candidate_grasps: 0 
-  rendered_images: 0
-  grasp_images: 0
-debug: 1
+  candidate_grasps: 0
+  rendered_images: 1
+  grasp_images: 1
+debug: 0

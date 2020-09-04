@@ -55,9 +55,10 @@ from autolab_core import Point, RigidTransform, YamlConfig
 import autolab_core.utils as utils
 from gqcnn.grasping import Grasp2D
 from visualization import Visualizer2D as vis2d
-from meshpy import ObjFile, RenderMode, SceneObject, UniformPlanarWorksurfaceImageRandomVariable
+from meshpy import ObjFile, StablePoseFile, RenderMode, SceneObject, UniformPlanarWorksurfaceImageRandomVariable
 from perception import CameraIntrinsics, BinaryImage, DepthImage
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 
 from dexnet.constants import READ_ONLY_ACCESS
 from dexnet.database import Hdf5Database
@@ -80,7 +81,9 @@ CACHE_FILENAME = 'grasp_cache.pkl'
 # Variables for creating a smaller dataset
 CREATE_SUBSET = True
 INDEX_START = 0
-INDEX_END = 2
+INDEX_END = 1
+RESCALING_FACTOR = 1  
+SAVE_ONE_OBJECT = True 
 
 class GraspInfo(object):
     """ Struct to hold precomputed grasp attributes.
@@ -304,6 +307,7 @@ def generate_gqcnn_dataset(dataset_path,
                         T_obj_stp = stable_pose.T_obj_table.as_frames('obj', 'stp')
                         T_obj_table = obj.mesh.get_T_surface_obj(T_obj_stp, delta=table_offset).as_frames('obj', 'table')
                         T_table_obj = T_obj_table.inverse()
+
                         collision_checker.set_table(table_mesh_filename, T_table_obj)
 
                         # read grasp and metrics
@@ -364,11 +368,32 @@ def generate_gqcnn_dataset(dataset_path,
         object_keys = dataset.object_keys
         for obj_key in object_keys:
             obj = dataset[obj_key]
+            obj.mesh.rescale(RESCALING_FACTOR)
             if obj.key not in target_object_keys[dataset.name]:
                 continue
 
             # read in the stable poses of the mesh
             stable_poses = dataset.stable_poses(obj.key)
+
+            if SAVE_ONE_OBJECT:
+		# Save object mesh
+                savefile = ObjFile("./data/meshes/dexnet/"+obj.key+".obj")
+                savefile.write(obj.mesh) 
+		# Save stable poses
+                save_stp = StablePoseFile("./data/meshes/dexnet/"+obj.key+".stp")
+                save_stp.write(stable_poses)
+                candidate_grasp_info = candidate_grasps_dict[obj.key][stable_poses[0].id]
+		print("Stable pose id:",stable_poses[0].id)
+                candidate_grasps = [g.grasp for g in candidate_grasp_info]
+		# Save candidate grasp info
+		pkl.dump(candidate_grasps_dict[obj.key], open("./data/meshes/dexnet/"+obj.key+".pkl", 'wb'))
+		# Save grasp metrics
+                grasp_metrics = dataset.grasp_metrics(obj.key, candidate_grasps, gripper=gripper.name)
+                write_metrics = json.dumps(grasp_metrics)
+                f = open("./data/meshes/dexnet/"+obj.key+".json","w")
+                f.write(write_metrics)
+                f.close()
+
             for i, stable_pose in enumerate(stable_poses):
 
                 # render images if stable pose is valid
@@ -409,20 +434,34 @@ def generate_gqcnn_dataset(dataset_path,
                     if config['vis']['rendered_images']:
                         d = int(np.ceil(np.sqrt(image_samples_per_stable_pose)))
 
-                        # binary
-			fig = plt.figure(figsize=(8,8))
-			fig.suptitle('SEGMASK')
+                        #segmask
+                        vis2d.figure()
                         for j, render_sample in enumerate(render_samples):
-                            plt.subplot(d,d,j+1)
-                            plt.imshow(render_sample.renders[RenderMode.SEGMASK].image.data)
+                            vis2d.subplot(d,d,j+1)
+                            vis2d.imshow(render_sample.renders[RenderMode.SEGMASK].image)
 
                         # depth table
-			fig = plt.figure(figsize=(8,8))
-			fig.suptitle('DEPTH SCENE')
+                        vis2d.figure()
                         for j, render_sample in enumerate(render_samples):
-                            plt.subplot(d,d,j+1)
-                            plt.imshow(render_sample.renders[RenderMode.DEPTH_SCENE].image.data)
-                        plt.show()
+                            vis2d.subplot(d,d,j+1)
+                            vis2d.imshow(render_sample.renders[RenderMode.DEPTH_SCENE].image)
+                        vis2d.show()
+
+                        if False:
+                            # binary
+                            fig = plt.figure(figsize=(8,8))
+                            fig.suptitle('SEGMASK')
+                            for j, render_sample in enumerate(render_samples):
+                                plt.subplot(d,d,j+1)
+                                plt.imshow(render_sample.renders[RenderMode.SEGMASK].image.data)
+
+                            # depth table
+                            fig = plt.figure(figsize=(8,8))
+                            fig.suptitle('DEPTH SCENE')
+                            for j, render_sample in enumerate(render_samples):
+                                plt.subplot(d,d,j+1)
+                                plt.imshow(render_sample.renders[RenderMode.DEPTH_SCENE].image.data)
+                            plt.show()
 
                     # tally total amount of data
                     num_grasps = len(candidate_grasps)
@@ -481,37 +520,69 @@ def generate_gqcnn_dataset(dataset_path,
                                 grasp_center = Point(depth_im_tf_table.center,
                                                      frame=final_camera_intr.frame)
 
-#                                # plot 2D grasp image
-#                                plt.figure(figsize=(8,8))
-#                                plt.subplot(2,2,1)
-#                                plt.imshow(binary_im.data)
-#                                plt.title('Binary Image')
-#                                
-#                                plt.subplot(2,2,2)
-#                                plt.imshow(depth_im_table.data)
-#
-#                                plt.subplot(2,2,3)
-#                                plt.imshow(binary_im_tf.data)
-#
-#                                plt.subplot(2,2,4)
-#                                plt.imshow(depth_im_tf_table.data)
-#
-#                                plt.title('Coll Free? %d'%(grasp_info.collision_free))
-#                                plt.show()
-#				plt.close()
+                                # plot 2D grasp image
+                                grasp_center = Point(depth_im_tf_table.center,
+                                                     frame=final_camera_intr.frame)
+                                tf_grasp_2d = Grasp2D(grasp_center, 0,
+                                                      grasp_2d.depth,
+                                                      width=gripper.max_width,
+                                                      camera_intr=final_camera_intr) 
+				
+                                vis2d.figure()
+                                vis2d.subplot(2,2,1)
+                                vis2d.imshow(binary_im)
+                                vis2d.grasp(grasp_2d)
+                                vis2d.subplot(2,2,2)
+                                vis2d.imshow(depth_im_table)
+                                vis2d.grasp(grasp_2d)
+                                vis2d.subplot(2,2,3)
+                                vis2d.imshow(binary_im_tf)
+                                vis2d.grasp(tf_grasp_2d)
+                                vis2d.subplot(2,2,4)
+                                vis2d.imshow(depth_im_tf_table)
+                                vis2d.grasp(tf_grasp_2d)
+                                vis2d.title('Coll Free? %d'%(grasp_info.collision_free))
+                                vis2d.show()
+
+                                if False:
+                                    plt.figure(figsize=(8,8))
+                                    plt.subplot(2,2,1)
+                                    plt.imshow(binary_im.data)
+                                    plt.title('Binary Image')
+                                
+                                    plt.subplot(2,2,2)
+                                    plt.imshow(depth_im_table.data)
+ 
+                                    plt.subplot(2,2,3)
+                                    plt.imshow(binary_im_tf.data)
+
+                                    plt.subplot(2,2,4)
+                                    plt.imshow(depth_im_tf_table.data)
+
+                                    plt.title('Coll Free? %d'%(grasp_info.collision_free))
+                                    plt.show()
+                                    plt.close()
 
                                 # plot 3D visualization
+				# Whooza
+
 
                                 fig = plt.figure()
-                                ax = fig.add_subplot(111, projection='3d')
-                                print(obj.mesh.trimesh.faces)
-				ax.plot_trisurf(obj.mesh.trimesh.vertices[:,0],obj.mesh.trimesh.vertices[:,1],obj.mesh.trimesh.vertices[:,2])
+				ax = fig.add_subplot(111, projection='3d',transform=T_obj_camera)
+
+				object_vertices = obj.mesh.trimesh.vertices
+
+				table_vertices = table_mesh.trimesh.vertices
+#				ax.plot_trisurf(table_vertices[:,0],table_vertices[:,1],triangles=table_mesh.trimesh.faces,Z=table_vertices[:,2],color='g')
+				ax.plot_trisurf(object_vertices[:,0],object_vertices[:,1],triangles = obj.mesh.trimesh.faces, Z=object_vertices[:,2],color='b')
+#				Axes3D(fig,rect=(-0.2,-0.2,0.4,0.4),transform=T_obj_camera) 
 				plt.show()
 
-                                vis.figure()
-                                T_obj_world = vis.mesh_stable_pose(obj.mesh.trimesh, stable_pose.T_obj_world, style='surface', dim=0.5)
-                                vis.gripper(gripper, grasp, T_obj_world, color=(0.3,0.3,0.3))
-                                vis.show()
+                                if False:
+                                    vis.figure()
+                                    T_obj_world = vis.mesh_stable_pose(obj.mesh.trimesh, stable_pose.T_obj_world, style='surface', dim=0.5)
+                                    vis.gripper(gripper, grasp, T_obj_world, color=(0.3,0.3,0.3))
+                                    vis.show()
 
                             # form hand pose array
                             hand_pose = np.r_[grasp_2d.center.y,

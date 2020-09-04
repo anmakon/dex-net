@@ -347,10 +347,10 @@ class DexNet_cli(object):
         object_name = self._get_fixed_input(objects, "object key")
         if object_name is None: return True
         
-        try:
-            self.dexnet_api.display_object(object_name)
-        except Exception as e:
-            print("Display object failed: {}".format(str(e)))
+        #try:
+        self.dexnet_api.display_object(object_name)
+        #except Exception as e:
+        #    print("Display object failed: {}".format(str(e)))
         return True
 
     def display_stable_poses(self):

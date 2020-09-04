@@ -18,6 +18,7 @@ env/
 bin/
 build/
 deps/
+data/
 develop-eggs/
 dist/
 downloads/
