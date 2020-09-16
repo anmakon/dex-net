@@ -1,6 +1,7 @@
 import argparse
 import cPickle as pkl
 import json
+import csv
 import os
 import numpy as np
 
@@ -12,20 +13,30 @@ from dexnet.constants import READ_ONLY_ACCESS
 from dexnet.grasping import GraspCollisionChecker, RobotGripper
 from dexnet.database import Hdf5Database
 
+"""
+Script to save dexnet objects for dexnet database to file.
+Object, pose and grasp can be specified via the script 
+dexnet/tools/create_validation_pointers.py.
+Data files are being saved to dexnet/data/meshes/dexnet.
+With --num, the maximum amount of grasps in one subset (KIT and 3DNet)
+can be specified.
+"""
+
 class GraspInfo(object):
 	def __init__(self,grasp,collision_free,phi=0.0):
 		self.grasp = grasp
 		self.collision_free = collision_free
 		self.phi = phi
 
-def save_dexnet_objects(output_path, database, target_object_keys, config, pointers):
+def save_dexnet_objects(output_path, database, target_object_keys, config, pointers,num):
+
+	file_arr = []
 
 	if not os.path.exists(output_path):
 		os.mkdir(output_path)
 	for each_file in os.listdir(output_path):
 		os.remove(output_path+'/'+each_file)
 	gripper = RobotGripper.load(config['gripper'])
-	stable_pose_min_p = config['stable_pose_min_p']
 
 	# Setup grasp params:
 	table_alignment_params = config['table_alignment']
@@ -60,18 +71,19 @@ def save_dexnet_objects(output_path, database, target_object_keys, config, point
 
 	dataset_names = target_object_keys.keys()
 	datasets = [database.dataset(dn) for dn in dataset_names]
-#	new_datasets = []
 
 	start = 0
 	for dataset in datasets:
 		target_object_keys[dataset.name] = []
 		end = start + len(dataset.object_keys)
-		for _id in pointers.obj_ids:
+		for cnt, _id in enumerate(pointers.obj_ids):
 			if _id >= end or _id < start:
 				continue
 			target_object_keys[dataset.name].append(dataset.object_keys[_id-start])
-		#	new_datasets.append(dataset.subset(dataset.object_keys[_id-start-1],dataset.object_keys[_id-start+1]))
+			file_arr.append(tuple([dataset.object_keys[_id-start],pointers.tensor[cnt],pointers.array[cnt]]))
 		start += end
+	print(file_arr)
+	file_arr = np.array(file_arr,dtype=[('Object_id',(np.str_,40)),('Tensor',int),('Array',int)])
 		
 	# Precompute set of valid grasps
 	candidate_grasps_dict = {}
@@ -81,7 +93,6 @@ def save_dexnet_objects(output_path, database, target_object_keys, config, point
 		for obj in dataset:
 			if obj.key not in target_object_keys[dataset.name]:
 				continue
-			print(pointers.pose_num[counter])
 			# Initiate candidate grasp storage
 			candidate_grasps_dict[obj.key] = {}
 
@@ -94,7 +105,14 @@ def save_dexnet_objects(output_path, database, target_object_keys, config, point
 
 			# Get the stable pose of the validation point
 			# The previous pose number is the pose number of the last grasp of the previous object
-			stable_pose = stable_poses[pointers.pose_num[counter]]
+			try:
+				stable_pose = stable_poses[pointers.pose_num[counter]]
+			except:
+				print("Problems with reading pose. Tensor %d, Array %d, Pose %d" %\
+					(pointers.tensor[counter],pointers.array[counter],pointers.pose_num[counter]))
+				counter += 1
+				print("Continue.")
+				continue
 			candidate_grasps_dict[obj.key][stable_pose.id] = []
 			
 			# Setup table in collision checker
@@ -130,6 +148,7 @@ def save_dexnet_objects(output_path, database, target_object_keys, config, point
 				#Store if aligned to table
 				if i == pointers.grasp_num[counter]:
 					candidate_grasps_dict[obj.key][stable_pose.id].append(GraspInfo(aligned_grasp,collision_free))
+					# Add file pointers to file arr
 				i += 1
 			counter += 1
 
@@ -151,20 +170,38 @@ def save_dexnet_objects(output_path, database, target_object_keys, config, point
 			f.write(write_metrics) 
 			f.close()
 
+			if num is not None and counter >= num:
+				break
+	with open('./data/meshes/dexnet/files.csv','w') as csv_file:
+		csv_writer = csv.writer(csv_file,delimiter=',')
+		for point in file_arr:
+			csv_writer.writerow(point)
 
 
-class ValidationPointers():
+
+
+class ValidationPointers(object):
 	def __init__(self,filename='./data/generated_val_indices.txt'):
 		f = open(filename,'rb')
 		dtype = [('Tensor',int),('Array',int),('Obj_id',int),('Pose_num',int),('Grasp_num',int),('Prev_obj_id',int)]
 		data = np.array([tuple(map(int,line.split(','))) for line in f if not 'label' in line],dtype=dtype)
 		data = np.sort(data,order='Obj_id')
+		self.tensor = data['Tensor']
+		self.array = data['Array']
 		self.obj_ids = data['Obj_id']
 		self.pose_num = data['Pose_num']
 		self.grasp_num = data['Grasp_num']
 		self.prev_obj_ids = data['Prev_obj_id']
 
 if __name__ == '__main__':
+
+	parser = argparse.ArgumentParser()
+	parser.add_argument("--num",
+				type = int,
+				default = None)
+
+	args = parser.parse_args()
+	num = args.num
 
 	config_filename = "./cfg/tools/generate_gqcnn_dataset.yaml"
 	output_path = "./data/meshes/dexnet"
@@ -178,4 +215,4 @@ if __name__ == '__main__':
 	
 	target_object_keys = config['target_objects']
 	
-	save_dexnet_objects(output_path,database,target_object_keys,config,pointers)
+	save_dexnet_objects(output_path,database,target_object_keys,config,pointers,num)
