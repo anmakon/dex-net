@@ -21,4 +21,4 @@ then
 fi
 
 echo render 
-python tools/render_dataset.py --dir "$CurrentDate"_elev_$1 --elev $1
+python tools/reprojection.py --dir "$CurrentDate"_reprojection_elev_$1 --elev $1

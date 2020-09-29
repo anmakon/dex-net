@@ -23,13 +23,16 @@ can be specified.
 """
 
 class GraspInfo(object):
-	def __init__(self,grasp,collision_free,phi=0.0):
+	def __init__(self,grasp,collision_free,contact_points,phi=0.0):
 		self.grasp = grasp
 		self.collision_free = collision_free
+		self.contact_point1 = contact_points[0]
+		self.contact_point2 = contact_points[1]
 		self.phi = phi
 
 def save_dexnet_objects(output_path, database, target_object_keys, config, pointers,num):
 
+	slice_dataset = False
 	file_arr = []
 
 	if not os.path.exists(output_path):
@@ -71,6 +74,9 @@ def save_dexnet_objects(output_path, database, target_object_keys, config, point
 
 	dataset_names = target_object_keys.keys()
 	datasets = [database.dataset(dn) for dn in dataset_names]
+			
+	if slice_dataset:
+		datasets = [dataset.subset(0,100) for dataset in datasets]
 
 	start = 0
 	for dataset in datasets:
@@ -82,7 +88,8 @@ def save_dexnet_objects(output_path, database, target_object_keys, config, point
 			target_object_keys[dataset.name].append(dataset.object_keys[_id-start])
 			file_arr.append(tuple([dataset.object_keys[_id-start],pointers.tensor[cnt],pointers.array[cnt]]))
 		start += end
-	print(file_arr)
+	print("file arr:",file_arr)
+	print("target object keys:",target_object_keys)
 	file_arr = np.array(file_arr,dtype=[('Object_id',(np.str_,40)),('Tensor',int),('Array',int)])
 		
 	# Precompute set of valid grasps
@@ -144,10 +151,14 @@ def save_dexnet_objects(output_path, database, target_object_keys, config, point
 					if not collides:
 						collision_free = True
 						break
+				
+
 
 				#Store if aligned to table
 				if i == pointers.grasp_num[counter]:
-					candidate_grasps_dict[obj.key][stable_pose.id].append(GraspInfo(aligned_grasp,collision_free))
+					found,contact_points = aligned_grasp.close_fingers(obj)
+					print("Contact points",contact_points)
+					candidate_grasps_dict[obj.key][stable_pose.id].append(GraspInfo(aligned_grasp,collision_free,[contact_points[0].point,contact_points[1].point]))
 					# Add file pointers to file arr
 				i += 1
 			counter += 1

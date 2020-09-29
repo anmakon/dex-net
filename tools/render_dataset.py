@@ -72,8 +72,8 @@ def visualise_sample(sample,candidate_grasp_info,grasp_metrics,tensor,array,cur_
 		binary_im_tf = binary_im_tf.crop(96,96)
 		depth_im_tf_table = depth_im_tf_table.crop(96,96)
 
-		binary_im_tf = binary_im_tf.resize((32,32),interp='nearest')
-		depth_im_tf_table = depth_im_tf_table.resize((32,32))
+		binary_im_tf = binary_im_tf.resize((32,32),interp='bilinear')
+		depth_im_tf_table = depth_im_tf_table.resize((32,32),interp='bilinear')
 
 		hand_pose = np.r_[grasp_2d.center.y,
 					grasp_2d.center.x,
@@ -178,6 +178,7 @@ for object_id in all_objects:
 		try:
 			candidate_grasp_info = candidate_grasps_dict[stable_pose.id]
 		except KeyError:
+			print("Whoops, that didn't work. Stable pose id:",stable_pose.id)
 			continue
 
 		urv = UniformPlanarWorksurfaceImageRandomVariable(object_mesh,
