@@ -762,7 +762,7 @@ class ParallelJawPtGrasp3D(PointGrasp):
         u_grasp_camera = camera_intr.project(p_grasp_camera)
         d_grasp_camera = t_grasp_camera[2]
         return Grasp2D(u_grasp_camera, rot_z, d_grasp_camera,
-                       width=self.open_width,
+                       width=self.width_from_endpoints,
                        camera_intr=camera_intr)
 
     @staticmethod

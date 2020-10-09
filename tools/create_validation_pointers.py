@@ -1,66 +1,79 @@
 import numpy as np
 
-# Script to sample validation grasping points from the DexNet 2.0 dataset.
-# Amount of samples given through input during script execution
-# Ratio of positive and negative ground truth grasps can be varied by changing
-# the global variable RATIO_POS.
-
-RATIO_POS = 1
+RATIO_POS = 1.0
 METRIC_TRESH = 0.002
 
 class CreateValidationPointers():
 	def __init__(self):
-		dataset_path = "/media/psf/Home/Documents/Grasping_Research/Datasets/dexnet_2_tensor/"
-		self.data_path = dataset_path+"tensors/"
-		self.output_file = "data/generated_val_indices.txt"
-		self.indices_file = dataset_path+"splits/image_wise/val_indices.npz"
+		self.path = "tensors/"
+		self.output_file = "generated_val_indices.txt"
+		self.indices_file = "./splits/image_wise/val_indices.npz"
 		self.main()
 
 	def _get_pose_number(self,obj_label):
-		""" During dataset generation, the pose is incremented for every new stable pose.
-		To get the identifier of the stable pose of a specific validation grasping point,
-		the pose number has to be subtracted by the pose number of the last stable pose in the previous
-		object.
-		Returns the identifier of the stable pose within the given object.
-		"""
+		# This is to get the pose number for the chosen datapoint. As the pose labels are incrementing over the 
+		# whole dataset, subtract the current pose label from the first pose label of the object
+		# This ain't working. Check it!
+
 		old_tensor = self.tensor
-		obj_labels = np.load(self.data_path+"object_labels_"+self._filepointer()+".npz")['arr_0']
-		pose_label = np.load(self.data_path+"pose_labels_"+self._filepointer()+".npz")['arr_0'][self.array]
+		obj_labels = np.load(self.path+"object_labels_"+self._filepointer()+".npz")['arr_0']
+		pose_label = np.load(self.path+"pose_labels_"+self._filepointer()+".npz")['arr_0'][self.array]
+
+		# Iterate until there is an object label smaller than the datapoint object label in the tensor
 		while not np.any(obj_labels < obj_label):
 			self.tensor -= 1
-			obj_labels = np.load(self.data_path+"object_labels_"+self._filepointer()+".npz")['arr_0']
-		match = np.where(obj_label-1 == obj_labels)[0]
-		try:
-			position = match[-1]
-		except IndexError:
-			position = match
-		prev_obj_label = np.load(self.data_path+"object_labels_"+self._filepointer()+".npz")['arr_0'][position]
-		if position == 999:
-			print("Special case")
+			obj_labels = np.load(self.path+"object_labels_"+self._filepointer()+".npz")['arr_0']
+
+		# Increase the tensor if there are no object labels fitting the datapoint object label
+		if not np.any(obj_labels == obj_label):
 			self.tensor += 1
-			first_pose_label = np.load(self.data_path+"pose_labels_"+self._filepointer()+".npz")['arr_0'][0]
-		else:
-			first_pose_label = np.load(self.data_path+"pose_labels_"+self._filepointer()+".npz")['arr_0'][position+1]
+			obj_labels = np.load(self.path+"object_labels_"+self._filepointer()+".npz")['arr_0']
+
+		# Take the first datapoint where the object label matches
+		match = np.where(obj_labels == obj_label)[0]
+		position = match[0]
+	
+		# Load the pose label
+		first_pose_label = np.load(self.path+"pose_labels_"+self._filepointer()+".npz")['arr_0'][position]
+
+		# Compute the pose number
 		pos_num = pose_label-first_pose_label
 		self.tensor = old_tensor
-		return prev_obj_label, pos_num
+		return pos_num
 	
 	def _get_grasp_number(self,image_label):
-		""" Get identifier of grasp position. Grasp position is being iterated for every new grasp during dataset
-		generation. To get the grasp position, the image label of the validation grasping point has to be subtracted
-		by the last image label of the previous stable pose in the dataset.
-		Returns the identifier of the grasp position within the stable pose.
-		"""
+		# This is to get the grasp number. Each grasp is presented in each image. To get the grasp number,
+		# count the position of the datapoint in the datapoints with the same image label.
+
 		old_tensor = self.tensor
-		image_labels = np.load(self.data_path+"image_labels_"+self._filepointer()+".npz")['arr_0']
-		if np.any(image_labels < image_label):
-			match = np.where(image_label == image_labels)[0]
-			grasp_num = self.array-match[0]
-		else:
+		image_labels = np.load(self.path+"image_labels_"+self._filepointer()+".npz")['arr_0']
+		reduced = False
+
+		# Iterate if you don't find any image label in the tensor that is smaller than the datapoint image label
+		i = 0
+		while not np.any(image_labels < image_label):
 			self.tensor -= 1
-			image_labels = np.load(self.data_path+"image_labels_"+self._filepointer()+".npz")['arr_0']
-			match = np.where(image_label == image_labels)[0]
-			grasp_num = self.array+len(image_labels)-match[0]	
+			image_labels = np.load(self.path+"image_labels_"+self._filepointer()+".npz")['arr_0']
+			reduced = True
+			i += 1
+			if i >= 2:
+				print("Houston, we have a problem")
+
+		# Increase the tensor if there are no image labels fitting the datapoint image label
+		if not np.any(image_labels == image_label):
+			self.tensor += 1
+			image_labels = np.load(self.path+"image_labels_"+self._filepointer()+".npz")['arr_0']
+		
+		match = np.where(image_label == image_labels)[0]
+		# Get the grasp number
+		if reduced:
+			if type(match) == int:
+				grasp_num = self.array+len(image_labels)-match
+			else:
+				grasp_num = self.array+len(image_labels)-match[0]
+		else:
+			grasp_num = self.array-match[0]
+
 		self.tensor = old_tensor
 		return grasp_num
 			
@@ -76,34 +89,29 @@ class CreateValidationPointers():
 		pos = 0
 
 		while len(val_ind)<n:
-			# Sampling random indices from the validation datapoints
 			index = np.random.choice(validation_indices)
 			self.tensor = index // 1000
 			self.array = index % 1000
-			metric = np.load(self.data_path+"robust_ferrari_canny_"+self._filepointer()+".npz")['arr_0'][self.array]
-			# Checking if the point has the right ground truth for the desired ratio
-			if (pos < int(n * RATIO_POS)) and (metric > METRIC_TRESH):
-				print( metric)
+			metric = np.load(self.path+"robust_ferrari_canny_"+self._filepointer()+".npz")['arr_0'][self.array]
+			if (pos <= int(n * RATIO_POS)) and (metric > METRIC_TRESH):
 				pos += 1
 				val_ind.append(index)
-			elif (pos >= int(n * RATIO_POS)) and (metric <= METRIC_TRESH):
+			elif (pos > int(n * RATIO_POS)) and (metric <= METRIC_TRESH):
 				val_ind.append(index)
 
 		f = open(self.output_file,"w")
 		f.write("Tensor, Array, Object_label, Pose_num, Grasp_num, Prev_object_label\n")
 
 		for index in val_ind:
-			# Iterate through indices
 			self.tensor = index // 1000
 			self.array = index % 1000
 
-			obj_label = np.load(self.data_path+"object_labels_"+self._filepointer()+".npz")['arr_0'][self.array]
-			image_label = np.load(self.data_path+"image_labels_"+self._filepointer()+".npz")['arr_0'][self.array]
-			prev_obj_label,pose_num = self._get_pose_number(obj_label)
+			obj_label = np.load(self.path+"object_labels_"+self._filepointer()+".npz")['arr_0'][self.array]
+			image_label = np.load(self.path+"image_labels_"+self._filepointer()+".npz")['arr_0'][self.array]
+			pose_num = self._get_pose_number(obj_label)
 			grasp_num = self._get_grasp_number(image_label)
 
-			# Write data into file
-			f.write("%d,%d,%d,%d,%d,%d\n"%(self.tensor,self.array,obj_label,pose_num,grasp_num,prev_obj_label))
+			f.write("%d,%d,%d,%d,%d\n"%(self.tensor,self.array,obj_label,pose_num,grasp_num))
 		f.close()
 
 if __name__ == "__main__":

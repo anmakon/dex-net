@@ -158,28 +158,34 @@ def save_dexnet_objects(output_path, database, target_object_keys, config, point
 				if i == pointers.grasp_num[counter]:
 					found,contact_points = aligned_grasp.close_fingers(obj)
 					print("Contact points",contact_points)
-					candidate_grasps_dict[obj.key][stable_pose.id].append(GraspInfo(aligned_grasp,collision_free,[contact_points[0].point,contact_points[1].point]))
-					# Add file pointers to file arr
+					if not found:
+						print("Could not find contact points. continue.")
+						break	
+					else:
+						candidate_grasps_dict[obj.key][stable_pose.id].append(GraspInfo(aligned_grasp,\
+														collision_free,\
+														[contact_points[0].point,contact_points[1].point]))
+
 				i += 1
 			counter += 1
-
-			# Save files
-			print("Saving file: ",obj.key)
-			savefile = ObjFile("./data/meshes/dexnet/"+obj.key+".obj") 
-			savefile.write(obj.mesh)  
-			# Save stable poses 
-			save_stp = StablePoseFile("./data/meshes/dexnet/"+obj.key+".stp") 
-			save_stp.write(stable_poses) 
-			# Save candidate grasp info 
-			pkl.dump(candidate_grasps_dict[obj.key], open("./data/meshes/dexnet/"+obj.key+".pkl", 'wb')) 
-			# Save grasp metrics 
-			candidate_grasp_info = candidate_grasps_dict[obj.key][stable_pose.id]
-			candidate_grasps = [g.grasp for g in candidate_grasp_info]
-			grasp_metrics = dataset.grasp_metrics(obj.key, candidate_grasps, gripper=gripper.name) 
-			write_metrics = json.dumps(grasp_metrics) 
-			f = open("./data/meshes/dexnet/"+obj.key+".json","w") 
-			f.write(write_metrics) 
-			f.close()
+			if found:
+				# Save files
+				print("Saving file: ",obj.key)
+				savefile = ObjFile("./data/meshes/dexnet/"+obj.key+".obj") 
+				savefile.write(obj.mesh)  
+				# Save stable poses 
+				save_stp = StablePoseFile("./data/meshes/dexnet/"+obj.key+".stp") 
+				save_stp.write(stable_poses) 
+				# Save candidate grasp info 
+				pkl.dump(candidate_grasps_dict[obj.key], open("./data/meshes/dexnet/"+obj.key+".pkl", 'wb')) 
+				# Save grasp metrics 
+				candidate_grasp_info = candidate_grasps_dict[obj.key][stable_pose.id]
+				candidate_grasps = [g.grasp for g in candidate_grasp_info]
+				grasp_metrics = dataset.grasp_metrics(obj.key, candidate_grasps, gripper=gripper.name) 
+				write_metrics = json.dumps(grasp_metrics) 
+				f = open("./data/meshes/dexnet/"+obj.key+".json","w") 
+				f.write(write_metrics) 
+				f.close()
 
 			if num is not None and counter >= num:
 				break
@@ -194,7 +200,7 @@ def save_dexnet_objects(output_path, database, target_object_keys, config, point
 class ValidationPointers(object):
 	def __init__(self,filename='./data/generated_val_indices.txt'):
 		f = open(filename,'rb')
-		dtype = [('Tensor',int),('Array',int),('Obj_id',int),('Pose_num',int),('Grasp_num',int),('Prev_obj_id',int)]
+		dtype = [('Tensor',int),('Array',int),('Obj_id',int),('Pose_num',int),('Grasp_num',int)]
 		data = np.array([tuple(map(int,line.split(','))) for line in f if not 'label' in line],dtype=dtype)
 		data = np.sort(data,order='Obj_id')
 		self.tensor = data['Tensor']
@@ -202,7 +208,6 @@ class ValidationPointers(object):
 		self.obj_ids = data['Obj_id']
 		self.pose_num = data['Pose_num']
 		self.grasp_num = data['Grasp_num']
-		self.prev_obj_ids = data['Prev_obj_id']
 
 if __name__ == '__main__':
 

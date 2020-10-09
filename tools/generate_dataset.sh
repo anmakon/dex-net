@@ -21,4 +21,4 @@ then
 fi
 
 echo render 
-python tools/reprojection.py --dir "$CurrentDate"_reprojection_elev_$1 --elev $1
+python tools/open3d_reprojection.py --dir "$CurrentDate"_reprojection_elev_$1 --elev $1
