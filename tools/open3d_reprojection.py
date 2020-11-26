@@ -3,8 +3,11 @@ import json
 import cPickle as pkl
 import gc
 import csv
+import time
 import os
 import argparse
+
+import meshlabxml as mlx
 import open3d as o3d
 
 from PIL import Image,ImageDraw
@@ -36,6 +39,7 @@ class Reprojection():
 		table_file = './data/meshes/table.obj'
 		self.table_mesh = ObjFile(table_file).read()
 		self.data_dir = './data/meshes/dexnet/'
+#		self.data_dir = './data/meshes/mug/'
 		self.output_dir = './data/rprojection_test'
 		self.config = YamlConfig('./cfg/tools/generate_projected_gqcnn_dataset.yaml')
 		
@@ -95,6 +99,9 @@ class Reprojection():
 
 	def start_rendering(self):
 		self._load_file_ids()
+
+		first_run=True
+
 		for object_id in self.all_objects:
 			self._load_data(object_id)
 			for i, stable_pose in enumerate(self.stable_poses):
@@ -120,6 +127,7 @@ class Reprojection():
 											scene_objs = scene_objs,
 											stable_pose=stable_pose)
 				render_sample = urv.rvs(size = self.random_positions)
+#				print("Rendered sample")
 				#for render_sample in render_samples:
 
 				binary_im = render_sample.renders[RenderMode.SEGMASK].image
@@ -128,32 +136,48 @@ class Reprojection():
 				if self.show_images:
 					orig_im.show()
 				orig_im.convert('RGB').save('./data/reprojection/'+object_id+'_elev_'+str(self.elev)+'_original.png')
+				print("Saved original")
 
 				T_stp_camera = render_sample.camera.object_to_camera_pose
 				shifted_camera_intr = render_sample.camera.camera_intr.crop(300,300,240,320)
 				depth_points = self._reproject_to_3D(depth_im,shifted_camera_intr)
 
 				transformed_points,T_camera = self._transformation(depth_points)
+#				print("T_camera:",T_camera)
 
 				camera_dir = np.dot(T_camera.rotation,np.array([0.0,0.0,-1.0]))
 
 				pcd = o3d.geometry.PointCloud()
 #				print(camera_dir)
 				pcd.points = o3d.utility.Vector3dVector(transformed_points.T)
-				#ToDo check normal directioni!!
+				#TODO check normals!!
+#				pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+#				pcd.normals = o3d.utility.Vector3dVector(-np.asarray(pcd.normals))
 				normals = np.repeat([camera_dir],len(transformed_points.T),axis=0)
 				pcd.normals = o3d.utility.Vector3dVector(normals)
-#				mesh,densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(pcd,depth=9)
-				mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_ball_pivoting(pcd,\
-												o3d.utility.DoubleVector([0.001,0.005,0.01]))
-				print("Mesh: ",mesh)
 
-				o3d.visualization.draw_geometries([mesh])
-				pcl = mesh.sample_points_uniformly(2000000)
-				new_points = np.asarray([pcl.points])[0].T
-#				print("New points:",new_points)
-				
-				projected_depth_im,new_camera_intr,table_height = self._projection(new_points,shifted_camera_intr)
+				if False:
+					cs_points = [[0,0,0],[1,0,0],[0,1,0],[0,0,1]]
+					cs_lines = [[0,1],[0,2],[0,3]]
+					colors = [[1,0,0],[0,1,0],[0,0,1]]
+					cs = o3d.geometry.LineSet(points=o3d.utility.Vector3dVector(cs_points),lines=o3d.utility.Vector2iVector(cs_lines))
+					cs.colors = o3d.utility.Vector3dVector(colors)
+					o3d.visualization.draw_geometries([pcd])
+	
+#				mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_ball_pivoting(pcd,\
+#													o3d.utility.DoubleVector([0.0005,0.001])) #0.0015
+				depth = self._o3d_meshing(pcd)
+
+#				projected_depth_im,new_camera_intr,table_height = self._projection(new_points,shifted_camera_intr)
+				new_camera_intr = shifted_camera_intr
+				new_camera_intr.cx=150
+				new_camera_intr.cy=150
+				print(depth)
+				projected_depth_im = np.asarray(depth)
+				projected_depth_im[projected_depth_im==0.0] = -1.0
+				table_height = np.median(projected_depth_im[projected_depth_im!=-1.0].flatten())
+				print("Minimum depth:",min(projected_depth_im.flatten()))
+				print("Maximum depth:",max(projected_depth_im.flatten()))
 
 				im = Image.fromarray(self._scale_image(projected_depth_im))
 
@@ -192,11 +216,12 @@ class Reprojection():
 						contact_occlusion = False
 					# Mark contact points in image
 					im = im.convert('RGB')
-					im_draw = ImageDraw.Draw(im)
-					im_draw.line([(c1[0],c1[1]-10),(c1[0],c1[1]+10)],fill=(255,0,0,255))
-					im_draw.line([(c1[0]-10,c1[1]),(c1[0]+10,c1[1])],fill=(255,0,0,255))
-					im_draw.line([(c2[0],c2[1]-10),(c2[0],c2[1]+10)],fill=(255,0,0,255))
-					im_draw.line([(c2[0]-10,c2[1]),(c2[0]+10,c2[1])],fill=(255,0,0,255))
+					if False:
+						im_draw = ImageDraw.Draw(im)
+						im_draw.line([(c1[0],c1[1]-10),(c1[0],c1[1]+10)],fill=(255,0,0,255))
+						im_draw.line([(c1[0]-10,c1[1]),(c1[0]+10,c1[1])],fill=(255,0,0,255))
+						im_draw.line([(c2[0],c2[1]-10),(c2[0],c2[1]+10)],fill=(255,0,0,255))
+						im_draw.line([(c2[0]-10,c2[1]),(c2[0]+10,c2[1])],fill=(255,0,0,255))
 					if self.show_images:
 						im.show()
 					im.save('./data/reprojection/'+object_id+'_elev_'+str(self.elev)+'_reprojected.png')
@@ -263,9 +288,54 @@ class Reprojection():
 				self.cur_pose_label += 1
 				gc.collect()
 			self.cur_obj_label += 1
+			# BREAK
+#			break
 	
 		self.tensor_dataset.flush()
 
+	def _o3d_meshing(self,pcd):
+		mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(pcd,depth=15)
+		densities = np.asarray(densities)
+		if False:
+			print('visualize densities')
+			densities = np.asarray(densities)
+			density_colors = plt.get_cmap('plasma')(
+				(densities - densities.min()) / (densities.max() - densities.min()))
+			density_colors = density_colors[:, :3]
+			density_mesh = o3d.geometry.TriangleMesh()
+			density_mesh.vertices = mesh.vertices
+			density_mesh.triangles = mesh.triangles
+			density_mesh.triangle_normals = mesh.triangle_normals
+			density_mesh.vertex_colors = o3d.utility.Vector3dVector(density_colors)
+			o3d.visualization.draw_geometries([density_mesh])
+		vertices_to_remove = densities < 7.0 # np.quantile(densities, 0.01)
+		mesh.remove_vertices_by_mask(vertices_to_remove)
+		mesh.compute_vertex_normals()
+		mesh.paint_uniform_color([0.6,0.6,0.6])
+
+#		o3d.visualization.draw_geometries([mesh])
+		vis = o3d.visualization.Visualizer()
+		vis.create_window(height=300,width=300,visible=False)
+		vis.get_render_option().load_from_json("./data/renderoption.json")
+		vis.add_geometry(mesh)
+		vic = vis.get_view_control()
+		params = vic.convert_to_pinhole_camera_parameters()
+		(fx,fy) = params.intrinsic.get_focal_length()
+		(cx,cy) = params.intrinsic.get_principal_point()
+		params.intrinsic.set_intrinsics(300,300,525,525,cx,cy)
+		params.extrinsic = np.array([[1,0,0,0], \
+						[0,1,0,0], \
+						[0,0,1,0], \
+						[0,0,0,1]])
+		vic.convert_from_pinhole_camera_parameters(params)
+		vis.poll_events()
+		vis.update_renderer()
+		depth = vis.capture_depth_float_buffer(do_render=True)
+#		vis.destroy_window()
+#		del vis
+		return depth
+		
+	
 	def _projection(self,transformed_points,camera_intr):
 		# Use Camera intrinsics
 		new_camera_intr =  camera_intr
