@@ -7,7 +7,6 @@ import time
 import os
 import argparse
 
-import meshlabxml as mlx
 import open3d as o3d
 
 from PIL import Image,ImageDraw
