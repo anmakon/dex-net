@@ -140,8 +140,12 @@ RUN pip install setuptools==44.0.0 wheel==0.34.2 imageio==2.5.0 joblib==0.14.1 c
     pip install freetype-py==2.1.0.post1 pyface==6.1.2 traitsui==6.1.3 && \
     pip install pyglet==1.4.10 && \
     pip install pyrender==0.1.36 && \
+    pip install dask==1.0.0 chardet==3.0.2 && \
     apt-get install -y libosmesa6-dev
 
+RUN rm -rf /usr/local/lib/python2.7/dist-packages/dask* && \
+    rm -rf /usr/local/lib/python2.7/dist-packages/toolz* && \
+    pip install scikit-image==0.14.2 scikit-learn==0.20.4 scikit-video==1.1.11 scipy==1.2.2 tensorflow==1.5.0 pyface==6.1.2 traitsui==6.1.3 mayavi==4.7.1
 
 RUN git clone https://github.com/anmakon/meshpy.git && \
     cd meshpy && \
@@ -155,8 +159,8 @@ RUN git clone https://github.com/anmakon/meshpy.git && \
     cd gqcnn/ && \
     python setup.py develop
 
-RUN rm -rf /usr/local/lib/python2.7/dist-packages/dask-2.30.0-py2.7.egg/ && \
-    rm -rf /usr/local/lib/python2.7/dist-packages/toolz-0.11.1-py2.7.egg/ && \
+RUN rm -rf /usr/local/lib/python2.7/dist-packages/dask* && \
+    rm -rf /usr/local/lib/python2.7/dist-packages/toolz* && \
     pip install scikit-image==0.14.2 scikit-learn==0.20.4 scikit-video==1.1.11 scipy==1.2.2 tensorflow==1.5.0 pyface==6.1.2 traitsui==6.1.3 mayavi==4.7.1
 
 # COPY AND INSTALL DEX-NET
