@@ -1,2 +1,2 @@
 #!/bin/bash
-docker build -t dexnet -f ./dex-net/gpu-dockerfile .
+docker build -t dexnet:gpu -f ./dex-net/gpu-dockerfile .

@@ -1,5 +1,5 @@
 # Dex-Net Database params
-database_name: data/dexnet_2_database.hdf5
+database_name: /data/dexnet_2_database.hdf5
 
 # Dataset params
 gripper: yumi_metal_spline

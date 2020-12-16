@@ -1,9 +1,31 @@
 # Berkeley AUTOLAB's Dex-Net Package
 
+## Installation
+
+1. Make sure you have a working version nvidia-docker installed on your computer.
+2. Create a _data directory_ in an accessible spot on your machine or an external drive. 
+   Download the [dexnet_2_database (meshes)](https://berkeley.app.box.com/s/eaq37px77jxktr8ggti016pr3gpudp9l)
+   and the [dexnet_2 dataset (images)](https://berkeley.app.box.com/s/6mnb2bzi5zfa7qpwyn7uq5atb7vbztng/folder/25803680060)
+   into your _data directory_.
+3. Choose a _working directory_. Clone the [dex-net repository](https://github.com/anmakon/dex-net)
+in your working directory.
+4. Run './dex-net/build_gpu_docker.sh' from your _working directory_.
+5. Set the variable PATH_DSET in _'dex-net/run_docker.sh'_ to your _data directory_.
+6. Run _'dex-net/run_docker.sh'_ from within your cloned dex-net directory within your _working directory_.
+
+## Recreate a Dex-Net dataset
+
+__Documentation is work in progress__
+
+---------------------------------------------------------------
+
 ## Links
+
+[Updated Project website](https://github.com/anmakon/dex-net)
+
 [Documentation](https://berkeleyautomation.github.io/dex-net/code.html)
 
-[Project website](https://berkeleyautomation.github.io/dex-net)
+[Original Project website](https://berkeleyautomation.github.io/dex-net)
 
 [RSS Paper](https://github.com/BerkeleyAutomation/dex-net/raw/gh-pages/docs/dexnet_rss2017_final.pdf)
 
@@ -23,9 +45,6 @@ If you are interested in this functionality, please email Jeff Mahler (jmahler@b
 
 This package is part of the [Dexterity Network (Dex-Net)](https://berkeleyautomation.github.io/dex-net) project.
 Created and maintained by the [AUTOLAB at UC Berkeley](https://autolab.berkeley.edu).
-
-## Installation
-See [the documentation](https://berkeleyautomation.github.io/dex-net/code.html) for installation instructions and API Documentation.
 
 ## Usage
 As of Feb. 1, 2018, the code is licensed according to the UC Berkeley Copyright and Disclaimer Notice.
