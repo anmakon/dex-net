@@ -40,10 +40,10 @@ use the [gqcnn repository](https://github.com/anmakon/gqcnn).
 --------------------------------
 
 (*) In case you want to generate more grasps than the 10 "PerfectPredictions", you need to download the full 
-[dexnet_2 meshes](https://berkeley.app.box.com/s/eaq37px77jxktr8ggti016pr3gpudp9l) dataset into your _data directory_.
+[dexnet_2 meshes](https://berkeley.app.box.com/s/eaq37px77jxktr8ggti016pr3gpudp9l) dataset into your `$DATA_DIR`.
 If you want to compare it to the original dataset, make sure to also download the
 [dexnet_2 images](https://berkeley.app.box.com/s/6mnb2bzi5zfa7qpwyn7uq5atb7vbztng/folder/25803680060) dataset
-into your _data directory_.
+into your `$DATA_DIR`.
 
 
 ------------------------------------------------------------
