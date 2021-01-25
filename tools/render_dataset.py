@@ -9,16 +9,17 @@ import os
 from meshpy import UniformPlanarWorksurfaceImageRandomVariable, ObjFile, StablePoseFile, RenderMode, SceneObject
 from autolab_core import Point, RigidTransform, YamlConfig
 from dexnet.learning import TensorDataset
+from PIL import Image
 
 """
 Script to render dexnet_2.0 dataset (without reprojection pipeline!). Output directory can be specified with --dir, 
 elevation angle (angle between z-axis and camera axis) can be specified with --elev. 
 """
 DATA_DIR = '/data'
-table_file = './data/meshes/table.obj'
+table_file = '/data/meshes/table.obj'
 
-data_dir = './data/meshes/dexnet/'
-output_dir = DATA_DIR + '/render_test/'
+data_dir = '/data/meshes/dexnet/'
+output_dir = DATA_DIR + '/Recreated_grasps/'
 
 config = YamlConfig('./cfg/tools/generate_gqcnn_dataset.yaml')
 
@@ -33,11 +34,20 @@ class GraspInfo(object):
         self.phi = phi
 
 
+def _scale_image(depth):
+    size = depth.shape
+    flattend = depth.flatten()
+    scaled = np.interp(flattend, (0.5, 0.75), (0, 255))
+    integ = scaled.astype(np.uint8)
+    integ.resize(size)
+    return integ
+
+
 def visualise_sample(sample, candidate_grasp_info, grasp_metrics, tensor, array, cur_image_label=0, cur_pose_label=0,
                      cur_obj_label=0):
     """Applying transformations to the images and camera intrinsics.
-	Visualising the binary and depth image of the object. 
-	Adding the corresponding values to the dataset"""
+    Visualising the binary and depth image of the object.
+    Adding the corresponding values to the dataset"""
 
     binary_im = sample.renders[RenderMode.SEGMASK].image
     depth_im_table = sample.renders[RenderMode.DEPTH_SCENE].image
@@ -71,8 +81,20 @@ def visualise_sample(sample, candidate_grasp_info, grasp_metrics, tensor, array,
         binary_im_tf = binary_im_tf.crop(96, 96)
         depth_im_tf_table = depth_im_tf_table.crop(96, 96)
 
-        binary_im_tf = binary_im_tf.resize((32, 32), interp='bilinear')
-        depth_im_tf_table = depth_im_tf_table.resize((32, 32), interp='bilinear')
+        # depth_image = _scale_image(np.asarray(depth_im_tf_table.data))
+        depth_image = np.asarray(depth_im_tf_table.data)
+        dep_image = Image.fromarray(depth_image).resize((32, 32), resample=Image.BILINEAR)
+        # image.resize((300, 300), resample=Image.NEAREST)\
+        #     .save(output_dir + '/' + str(tensor) + '_' + str(array) + '.png')
+        depth_im_tf = np.asarray(dep_image).reshape(32, 32, 1)
+
+        binary_image = np.asarray(binary_im_tf.data)
+        bin_image = Image.fromarray(binary_image).resize((32, 32), resample=Image.BILINEAR)
+        binary_im_tf = np.asarray(bin_image).reshape(32, 32, 1)
+
+        # Bilinear resizing didn't work within Depthimage - always nearest neighbour!
+        # binary_im_tf = binary_im_tf.resize((32, 32), interp='bilinear')
+        # depth_im_tf_table = depth_im_tf_table.resize((32, 32), interp='bilinear')
 
         hand_pose = np.r_[grasp_2d.center.y,
                           grasp_2d.center.x,
@@ -82,8 +104,8 @@ def visualise_sample(sample, candidate_grasp_info, grasp_metrics, tensor, array,
                           grasp_2d.center.x - shifted_camera_intr.cx,
                           grasp_2d.width_px / 3]
 
-        tensor_datapoint['depth_ims_tf_table'] = depth_im_tf_table.raw_data
-        tensor_datapoint['obj_masks'] = binary_im_tf.raw_data
+        tensor_datapoint['depth_ims_tf_table'] = depth_im_tf
+        tensor_datapoint['obj_masks'] = binary_im_tf
         tensor_datapoint['hand_poses'] = hand_pose
         tensor_datapoint['obj_labels'] = cur_obj_label
         tensor_datapoint['collision_free'] = collision_free
@@ -107,7 +129,7 @@ args = parser.parse_args()
 path = args.dir
 elev = args.elev
 if path is not None:
-    output_dir = './data/' + path
+    output_dir = '/data/' + path
 
 if elev is not None:
     print("Elevation angle is being set to %d" % elev)
@@ -133,8 +155,8 @@ cur_pose_label = 0
 cur_obj_label = 0
 cur_image_label = 0
 
-dtype = [('Obj_id', (np.str_, 40)), ('Tensor', int), ('Array', int)]
-with open(data_dir + 'filemv s.csv', 'r') as csv_file:
+dtype = [('Obj_id', (np.str_, 40)), ('Tensor', int), ('Array', int), ('Depth', float)]
+with open(data_dir + 'files.csv', 'r') as csv_file:
     csv_reader = csv.reader(csv_file, delimiter=',')
     data = []
     for row in csv_reader:
@@ -160,9 +182,11 @@ for object_id in all_objects:
     object_mesh = obj_reader.read()
 
     # Get tensor and array
-    print(object_id)
     tensor = file_arr['Tensor'][np.where(file_arr['Obj_id'] == object_id)][0]
     array = file_arr['Array'][np.where(file_arr['Obj_id'] == object_id)][0]
+    depth = file_arr['Depth'][np.where(file_arr['Obj_id'] == object_id)][0]
+    config['env_rv_params']['min_radius'] = depth
+    config['env_rv_params']['max_radius'] = depth
     print("Tensor %d, array %d" % (tensor, array))
 
     # Iterate through stable poses
@@ -177,7 +201,7 @@ for object_id in all_objects:
         try:
             candidate_grasp_info = candidate_grasps_dict[stable_pose.id]
         except KeyError:
-            print("Whoops, that didn't work. Stable pose id:", stable_pose.id)
+            # print("Whoops, that didn't work. Stable pose id:", stable_pose.id)
             continue
 
         urv = UniformPlanarWorksurfaceImageRandomVariable(object_mesh,
@@ -198,8 +222,8 @@ for object_id in all_objects:
                 cur_image_label += 1
         cur_pose_label += 1
         gc.collect()
-    # next stable pose
+        # next stable pose
     cur_obj_label += 1
-# next object
+    # next object
 # Save dataset
 tensor_dataset.flush()

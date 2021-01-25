@@ -4,15 +4,17 @@ import json
 import csv
 import os
 import numpy as np
+import logging
 
 from autolab_core import YamlConfig
 from meshpy import ObjFile, StablePoseFile
 
+from dexnet.visualization import DexNetVisualizer3D as vis
 from dexnet.constants import READ_ONLY_ACCESS
 from dexnet.grasping import GraspCollisionChecker, RobotGripper
 from dexnet.database import Hdf5Database
 
-DATA_DIR = '/data/reprojections'
+DATA_DIR = '/data'
 """
 Script to save dexnet objects for dexnet database to file.
 Object, pose and grasp can be specified via the script 
@@ -34,7 +36,7 @@ class GraspInfo(object):
 
 def save_dexnet_objects(output_path, database, target_object_keys, config, pointers, num):
     slice_dataset = False
-    file_arr = []
+    files = []
 
     if not os.path.exists(output_path):
         os.mkdir(output_path)
@@ -67,11 +69,13 @@ def save_dexnet_objects(output_path, database, target_object_keys, config, point
     approach_dist = coll_check_params['approach_dist']
     delta_approach = coll_check_params['delta_approach']
     table_offset = coll_check_params['table_offset']
+    stable_pose_min_p = config['stable_pose_min_p']
 
     table_mesh_filename = coll_check_params['table_mesh_filename']
     if not os.path.isabs(table_mesh_filename):
-        table_mesh_filename = os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', table_mesh_filename)
-    table_mesh = ObjFile(table_mesh_filename).read()
+        table_mesh_filename = os.path.join(DATA_DIR, table_mesh_filename)
+    #     #table_mesh_filename = os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', table_mesh_filename)
+    # table_mesh = ObjFile(table_mesh_filename).read()
 
     dataset_names = target_object_keys.keys()
     datasets = [database.dataset(dn) for dn in dataset_names]
@@ -87,11 +91,12 @@ def save_dexnet_objects(output_path, database, target_object_keys, config, point
             if _id >= end or _id < start:
                 continue
             target_object_keys[dataset.name].append(dataset.object_keys[_id - start])
-            file_arr.append(tuple([dataset.object_keys[_id - start], pointers.tensor[cnt], pointers.array[cnt]]))
+            files.append(tuple([dataset.object_keys[_id - start], pointers.tensor[cnt],
+                                   pointers.array[cnt], pointers.depths[cnt]]))
         start += end
-    print("file arr:", file_arr)
-    print("target object keys:", target_object_keys)
-    file_arr = np.array(file_arr, dtype=[('Object_id', (np.str_, 40)), ('Tensor', int), ('Array', int)])
+    print(target_object_keys)
+    print("target object keys:", len(target_object_keys['3dnet']), len(target_object_keys['kit']))
+    files = np.array(files, dtype=[('Object_id', (np.str_, 40)), ('Tensor', int), ('Array', int), ('Depth', float)])
 
     # Precompute set of valid grasps
     candidate_grasps_dict = {}
@@ -101,6 +106,7 @@ def save_dexnet_objects(output_path, database, target_object_keys, config, point
         for obj in dataset:
             if obj.key not in target_object_keys[dataset.name]:
                 continue
+            print("Object in subset")
             # Initiate candidate grasp storage
             candidate_grasps_dict[obj.key] = {}
 
@@ -110,17 +116,17 @@ def save_dexnet_objects(output_path, database, target_object_keys, config, point
 
             # Read in the stable poses of the mesh
             stable_poses = dataset.stable_poses(obj.key)
-
-            # Get the stable pose of the validation point
-            # The previous pose number is the pose number of the last grasp of the previous object
             try:
                 stable_pose = stable_poses[pointers.pose_num[counter]]
-            except:
+            except IndexError:
                 print("Problems with reading pose. Tensor %d, Array %d, Pose %d" %
                       (pointers.tensor[counter], pointers.array[counter], pointers.pose_num[counter]))
+                print("Stable poses:", stable_poses)
+                print("Pointers pose:", pointers.pose_num[counter])
                 counter += 1
                 print("Continue.")
                 continue
+            print("Read in stable pose")
             candidate_grasps_dict[obj.key][stable_pose.id] = []
 
             # Setup table in collision checker
@@ -136,6 +142,12 @@ def save_dexnet_objects(output_path, database, target_object_keys, config, point
             # align grasps with the table
             aligned_grasps = [grasp.perpendicular_table(stable_pose) for grasp in grasps]
             i = 0
+            found = False
+            if len(aligned_grasps) < pointers.grasp_num[counter]:
+                raise IndexError
+            print("pointers grasp num", pointers.grasp_num[counter])
+            print("tensor", pointers.tensor[counter])
+            print("array", pointers.array[counter])
             # Check grasp validity
             for aligned_grasp in aligned_grasps:
                 # Check angle with table plane and skip unaligned grasps
@@ -162,11 +174,16 @@ def save_dexnet_objects(output_path, database, target_object_keys, config, point
                         break
                     else:
                         print("Original metric: ", pointers.metrics[counter])
-                        print("Metrics mapped point: ", dataset.grasp_metrics(obj.key, aligned_grasp, gripper=gripper.name))
+                        print("Metrics mapped point: ", dataset.grasp_metrics(obj.key, [aligned_grasp], gripper=gripper.name))
                         candidate_grasps_dict[obj.key][stable_pose.id].append(GraspInfo(aligned_grasp,
                                                                                         collision_free,
                                                                                         [contact_points[0].point,
                                                                                          contact_points[1].point]))
+                        # logging.info('Grasp %d' % (aligned_grasp.id))
+                        # vis.figure()
+                        # vis.gripper_on_object(gripper, aligned_grasp, obj, stable_pose.T_obj_world, plot_table=False)
+                        # vis.show()
+                        break
 
                 i += 1
             counter += 1
@@ -193,7 +210,7 @@ def save_dexnet_objects(output_path, database, target_object_keys, config, point
                 break
     with open(DATA_DIR + '/meshes/dexnet/files.csv', 'w') as csv_file:
         csv_writer = csv.writer(csv_file, delimiter=',')
-        for point in file_arr:
+        for point in files:
             csv_writer.writerow(point)
 
 
@@ -201,8 +218,15 @@ class ValidationPointers(object):
     def __init__(self, filename=DATA_DIR + '/generated_val_indices.txt'):
         f = open(filename, 'rb')
         dtype = [('Tensor', int), ('Array', int), ('Obj_id', int),
-                 ('Pose_num', int), ('Grasp_num', int), ('Metric', float)]
-        data = np.array([tuple(map(int, line.split(','))) for line in f if not 'label' in line], dtype=dtype)
+                 ('Pose_num', int), ('Grasp_num', int), ('Metric', float), ('Depth', float)]
+        _data = []
+        for line in f:
+            if not 'label' in line:
+                val = line.split(',')
+                _data.append(tuple([int(val[0]), int(val[1]), int(val[2]),
+                                    int(val[3]), int(val[4]), float(val[5]), float(val[6])]))
+        data = np.array(_data, dtype=dtype)
+        # data = np.array([tuple(map(int, line.split(',')[:-1])) for line in f if not 'label' in line], dtype=dtype)
         data = np.sort(data, order='Obj_id')
         self.tensor = data['Tensor']
         self.array = data['Array']
@@ -210,6 +234,8 @@ class ValidationPointers(object):
         self.pose_num = data['Pose_num']
         self.grasp_num = data['Grasp_num']
         self.metrics = data['Metric']
+        self.depths = data['Depth']
+        print("Amount of grasps:", len(self.tensor))
 
 
 if __name__ == '__main__':
@@ -220,17 +246,16 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     num = args.num
+    logging.basicConfig(level=logging.WARNING)
 
     config_filename = "./cfg/tools/generate_gqcnn_dataset.yaml"
     output_path = DATA_DIR + "/meshes/dexnet"
 
     config = YamlConfig(config_filename)
-
     database = Hdf5Database(config['database_name'],
                             access_level=READ_ONLY_ACCESS)
 
     pointers = ValidationPointers()
-
     target_object_keys = config['target_objects']
 
     save_dexnet_objects(output_path, database, target_object_keys, config, pointers, num)

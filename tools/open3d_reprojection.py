@@ -17,10 +17,12 @@ from autolab_core import Point, RigidTransform, YamlConfig
 import matplotlib.pyplot as plt
 from dexnet.learning import TensorDataset
 
-DATA_DIR = '/data/reprojections'
+DATA_DIR = '/data'
+visualise_mesh = False
+
 """
-Script to render dexnet_2.0 dataset from oblique view, reproject into 3D, apply transformation to overhead camera at given distance
-and project back into depth image. 
+Script to render dexnet_2.0 dataset from oblique view, reproject into 3D, apply transformation 
+to overhead camera at given distance and project back into depth image. 
 """
 
 
@@ -33,14 +35,14 @@ class GraspInfo(object):
         self.phi = phi
 
 
-class Reprojection():
+class Reprojection:
     def __init__(self, path, elev):
         if not os.path.exists(DATA_DIR):
             raise NameError("Path %s is not specified. Is the docker file set up properly?" % DATA_DIR)
         table_file = DATA_DIR + '/meshes/table.obj'
         self.table_mesh = ObjFile(table_file).read()
-        self.data_dir = DATA_DIR +'/meshes/dexnet/'
-        self.output_dir = DATA_DIR+'/reprojection'
+        self.data_dir = DATA_DIR + '/meshes/dexnet/'
+        self.output_dir = DATA_DIR + '/reprojections/'
         self.config = YamlConfig('./cfg/tools/generate_projected_gqcnn_dataset.yaml')
 
         self.random_positions = 1
@@ -53,7 +55,7 @@ class Reprojection():
         self.cur_pose_label = 0
 
         if path is not None:
-            self.output_dir = DATA_DIR+'/reprojection/' + path
+            self.output_dir = DATA_DIR+'/reprojections/' + path
 
         if elev is not None:
             print("Elevation angle is being set to %d" % elev)
@@ -73,9 +75,13 @@ class Reprojection():
 
         self.tensor_dataset = TensorDataset(self.output_dir, tensor_config)
         self.tensor_datapoint = self.tensor_dataset.datapoint_template
+        if not os.path.exists(self.output_dir + '/images'):
+            os.makedirs(self.output_dir + '/images')
+        if not os.path.exists(self.output_dir + '/meshes'):
+            os.makedirs(self.output_dir + '/meshes')
 
     def _load_file_ids(self):
-        dtype = [('Obj_id', (np.str_, 40)), ('Tensor', int), ('Array', int)]
+        dtype = [('Obj_id', (np.str_, 40)), ('Tensor', int), ('Array', int), ('Depth', float)]
 
         with open(self.data_dir + 'files.csv', 'r') as csv_file:
             data = []
@@ -96,12 +102,16 @@ class Reprojection():
         self.stable_poses = StablePoseFile(self.data_dir + obj_id + '.stp').read()
         self.tensor = self.file_arr['Tensor'][np.where(self.file_arr['Obj_id'] == obj_id)][0]
         self.array = self.file_arr['Array'][np.where(self.file_arr['Obj_id'] == obj_id)][0]
+        depth = self.file_arr['Depth'][np.where(self.file_arr['Obj_id'] == obj_id)][0]
+        self.config['env_rv_params']['min_radius'] = depth
+        self.config['env_rv_params']['max_radius'] = depth
 
     def start_rendering(self):
         self._load_file_ids()
 
         for object_id in self.all_objects:
             self._load_data(object_id)
+
             for i, stable_pose in enumerate(self.stable_poses):
                 try:
                     candidate_grasp_info = self.candidate_grasps_dict[stable_pose.id]
@@ -153,17 +163,14 @@ class Reprojection():
                 normals = np.repeat([camera_dir], len(transformed_points.T), axis=0)
                 pcd.normals = o3d.utility.Vector3dVector(normals)
 
-                if False:
-                    cs_points = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]
-                    cs_lines = [[0, 1], [0, 2], [0, 3]]
-                    colors = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
-                    cs = o3d.geometry.LineSet(points=o3d.utility.Vector3dVector(cs_points),
-                                              lines=o3d.utility.Vector2iVector(cs_lines))
-                    cs.colors = o3d.utility.Vector3dVector(colors)
-                    o3d.visualization.draw_geometries([pcd])
+                # cs_points = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]
+                # cs_lines = [[0, 1], [0, 2], [0, 3]]
+                # colors = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+                # cs = o3d.geometry.LineSet(points=o3d.utility.Vector3dVector(cs_points),
+                #                           lines=o3d.utility.Vector2iVector(cs_lines))
+                # cs.colors = o3d.utility.Vector3dVector(colors)
+                # o3d.visualization.draw_geometries([pcd])
 
-                # mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_ball_pivoting(pcd,\
-                #   o3d.utility.DoubleVector([0.0005,0.001])) #0.0015
                 depth = self._o3d_meshing(pcd)
 
                 # projected_depth_im,new_camera_intr,table_height = self._projection(new_points,shifted_camera_intr)
@@ -243,9 +250,13 @@ class Reprojection():
                     # Set occlusions to table height for resizing image
                     depth_im_tf.data[depth_im_tf.data == -1.0] = table_height
 
-                    depth_im_tf_table = depth_im_tf.resize((32, 32,), interp='bilinear')
+                    depth_image = Image.fromarray(np.asarray(depth_im_tf.data))\
+                        .resize((32, 32), resample=Image.BILINEAR)
+                    depth_im_tf_table = np.asarray(depth_image).reshape(32, 32, 1)
 
-                    im = Image.fromarray(self._scale_image(depth_im_tf_table.data)).convert('RGB')
+                    # depth_im_tf_table = depth_im_tf.resize((32, 32,), interp='bilinear')
+
+                    im = Image.fromarray(self._scale_image(depth_im_tf_table.reshape(32, 32))).convert('RGB')
                     draw = ImageDraw.Draw(im)
                     draw.line([(c1_rotated[0], c1_rotated[1] - 3), (c1_rotated[0], c1_rotated[1] + 3)],
                               fill=(255, 0, 0, 255))
@@ -267,7 +278,7 @@ class Reprojection():
                                       grasp_2d.center.x - new_camera_intr.cx,
                                       grasp_2d.width_px / 3]
 
-                    self.tensor_datapoint['depth_ims_tf_table'] = depth_im_tf_table.raw_data
+                    self.tensor_datapoint['depth_ims_tf_table'] = depth_im_tf_table
                     self.tensor_datapoint['hand_poses'] = hand_pose
                     self.tensor_datapoint['obj_labels'] = self.cur_obj_label
                     self.tensor_datapoint['collision_free'] = collision_free
@@ -292,24 +303,27 @@ class Reprojection():
     def _o3d_meshing(self, pcd):
         mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(pcd, depth=15)
         densities = np.asarray(densities)
-        if False:
-            print('visualize densities')
-            densities = np.asarray(densities)
-            density_colors = plt.get_cmap('plasma')(
-                (densities - densities.min()) / (densities.max() - densities.min()))
-            density_colors = density_colors[:, :3]
-            density_mesh = o3d.geometry.TriangleMesh()
-            density_mesh.vertices = mesh.vertices
-            density_mesh.triangles = mesh.triangles
-            density_mesh.triangle_normals = mesh.triangle_normals
-            density_mesh.vertex_colors = o3d.utility.Vector3dVector(density_colors)
-            o3d.visualization.draw_geometries([density_mesh])
+
+        # print('visualize densities')
+        # densities = np.asarray(densities)
+        # density_colors = plt.get_cmap('plasma')(
+        #     (densities - densities.min()) / (densities.max() - densities.min()))
+        # density_colors = density_colors[:, :3]
+        # density_mesh = o3d.geometry.TriangleMesh()
+        # density_mesh.vertices = mesh.vertices
+        # density_mesh.triangles = mesh.triangles
+        # density_mesh.triangle_normals = mesh.triangle_normals
+        # density_mesh.vertex_colors = o3d.utility.Vector3dVector(density_colors)
+        # o3d.visualization.draw_geometries([density_mesh])
+
         vertices_to_remove = densities < 7.0  # np.quantile(densities, 0.01)
         mesh.remove_vertices_by_mask(vertices_to_remove)
         mesh.compute_vertex_normals()
         mesh.paint_uniform_color([0.6, 0.6, 0.6])
+        o3d.io.write_triangle_mesh(self.output_dir + '/meshes/' + "%05d_%03d.ply" % (self.tensor, self.array), mesh)
 
-        #		o3d.visualization.draw_geometries([mesh])
+        if visualise_mesh:
+            o3d.visualization.draw_geometries([mesh])
         vis = o3d.visualization.Visualizer()
         vis.create_window(height=300, width=300, visible=False)
         vis.get_render_option().load_from_json("./data/renderconfig.json")
@@ -382,18 +396,18 @@ class Reprojection():
         return transformed_points, RigidTransform(rotation=Rot, translation=trans, from_frame='camera',
                                                   to_frame='new_camera')
 
-    def _PCA(self, points, sorting=True):
-        mean = np.mean(points, axis=0)
-        data_adjusted = points - mean
-
-        matrix = np.cov(data_adjusted.T)
-        eigenvalues, eigenvectors = np.linalg.eig(matrix)
-
-        if sorting:
-            sort = eigenvalues.argsort()[::-1]
-            eigenvalues = eigenvalues[sort]
-            eigenvectors = eigenvectors[:, sort]
-        return eigenvalues, eigenvectors
+    # def _PCA(self, points, sorting=True):
+    #     mean = np.mean(points, axis=0)
+    #     data_adjusted = points - mean
+    #
+    #     matrix = np.cov(data_adjusted.T)
+    #     eigenvalues, eigenvectors = np.linalg.eig(matrix)
+    #
+    #     if sorting:
+    #         sort = eigenvalues.argsort()[::-1]
+    #         eigenvalues = eigenvalues[sort]
+    #         eigenvectors = eigenvectors[:, sort]
+    #     return eigenvalues, eigenvectors
 
     def _reproject_to_3D(self, depth_im, camera_intr):
         # depth points will be given in camera frame!

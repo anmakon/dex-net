@@ -8,9 +8,9 @@ DATA_DIR = '/data'
 class CreateValidationPointers:
     def __init__(self):
         self.path = DATA_DIR + "/dexnet_2_tensor/tensors/"
-        self.output_file = DATA_DIR + "/reprojections/generated_val_indices.txt"
+        self.output_file = DATA_DIR + "/meshes/generated_val_indices.txt"
         self.indices_file = DATA_DIR + "/dexnet_2_tensor/splits/image_wise/val_indices.npz"
-        self.tensor_file = "./data/excellent_predictions.txt"
+        self.tensor_file = DATA_DIR + "/PerfectPredictions/excellent_predictions.txt"
         self.random = False  # False --> take pointers from tensor_file; True --> generate random pointers
         self.tensor = 0
         self.array = 0
@@ -22,11 +22,11 @@ class CreateValidationPointers:
         # This ain't working. Check it!
 
         old_tensor = self.tensor
-        obj_labels = np.load(self.path + "object_labels_" + self._filepointer() + ".npz")['arr_0']
+        obj_labels = np.load(self.path + "object_labels_" + self._filepointer() + ".npz")['arr_0'][0:self.array]
         pose_label = np.load(self.path + "pose_labels_" + self._filepointer() + ".npz")['arr_0'][self.array]
 
         # Iterate until there is an object label smaller than the datapoint object label in the tensor
-        while not np.any(obj_labels < obj_label):
+        while not np.any(obj_labels != obj_label) and self.tensor > 0:
             self.tensor -= 1
             obj_labels = np.load(self.path + "object_labels_" + self._filepointer() + ".npz")['arr_0']
 
@@ -107,28 +107,36 @@ class CreateValidationPointers:
             tensorfile = open(self.tensor_file, 'r')
             for line in tensorfile:
                 if not 'Tensor' in line:
-                    self.tensor = int(line.split(',')[0])
-                    self.array = int(line.split(',')[1])
-                    val_ind.append([self.tensor, self.array])
+                    tensor = int(line.split(',')[0])
+                    array = int(line.split(',')[1])
+                    depth = float(line.split(',')[3])
+                    val_ind.append([tensor, array, depth])
 
         f = open(self.output_file, "w")
-        f.write("Tensor, Array, Object_label, Pose_num, Grasp_num, Prev_object_label, Robustness\n")
+        f.write("Tensor, Array, Object_label, Pose_num, Grasp_num, Prev_object_label, Robustness, Depth\n")
 
         for index in val_ind:
             if type(index) == list:
                 self.tensor = index[0]
                 self.array = index[1]
+                depth = index[2]
             else:
                 self.tensor = index // 1000
                 self.array = index % 1000
+                depth = 0.65
 
             obj_label = np.load(self.path + "object_labels_" + self._filepointer() + ".npz")['arr_0'][self.array]
             image_label = np.load(self.path + "image_labels_" + self._filepointer() + ".npz")['arr_0'][self.array]
-            pose_num = self._get_pose_number(obj_label)
-            grasp_num = self._get_grasp_number(image_label)
+            pose = self._get_pose_number(obj_label)
+            grasp = self._get_grasp_number(image_label)
             metric = np.load(self.path + "robust_ferrari_canny_" + self._filepointer() + ".npz")['arr_0'][self.array]
-
-            f.write("%d,%d,%d,%d,%d,%d\n" % (self.tensor, self.array, obj_label, pose_num, grasp_num, metric))
+            if metric == 0.0:
+                f.write("%d,%d,%d,%d,%d,%.1f,%.16f\n" %
+                        (self.tensor, self.array, obj_label, pose, grasp, metric, depth))
+            else:
+                f.write("%d,%d,%d,%d,%d,%.19f,%.16f\n" %
+                        (self.tensor, self.array, obj_label, pose, grasp, metric, depth))
+            # f.write("{},{},{},{},{},{}\n".format(self.tensor, self.array, obj_label, pose_num, grasp_num, metric))
         f.close()
 
 

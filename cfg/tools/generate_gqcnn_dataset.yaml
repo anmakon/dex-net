@@ -57,7 +57,7 @@ table_alignment:
 # Collision checking constraint parameters
 collision_checking:
   table_offset: 0.005
-  table_mesh_filename: data/meshes/table.obj
+  table_mesh_filename: meshes/table.obj
 
   approach_dist: 0.1
   delta_approach: 0.005

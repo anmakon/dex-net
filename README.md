@@ -1,22 +1,52 @@
 # Berkeley AUTOLAB's Dex-Net Package
 
-## Installation
 
-1. Make sure you have a working version nvidia-docker installed on your computer.
-2. Create a _data directory_ in an accessible spot on your machine or an external drive. 
-   Download the [dexnet_2_database (meshes)](https://berkeley.app.box.com/s/eaq37px77jxktr8ggti016pr3gpudp9l)
-   and the [dexnet_2 dataset (images)](https://berkeley.app.box.com/s/6mnb2bzi5zfa7qpwyn7uq5atb7vbztng/folder/25803680060)
-   into your _data directory_.
-3. Choose a _working directory_. Clone the [dex-net repository](https://github.com/anmakon/dex-net)
-in your working directory.
-4. Run './dex-net/build_gpu_docker.sh' from your _working directory_.
-5. Set the variable PATH_DSET in _'dex-net/run_docker.sh'_ to your _data directory_.
-6. Run _'dex-net/run_docker.sh'_ from within your cloned dex-net directory within your _working directory_.
+### Installation and set-up
 
-## Recreate a Dex-Net dataset
+1. Make sure you have a working version nvidia-docker installed on your computer. 
+   
+2. Clone the [dex-net repository](https://github.com/anmakon/dex-net) from github to a directory of your choice: `$WORKING_DIR/dex-net`.
+   
+3. Download the [data.zip](https://maynoothuniversity.sharepoint.com/:u:/r/sites/AnnaPhD/Shared%20Documents/General/data.zip?csf=1&web=1&e=oPbqqe)
+from the SharePoint* and extract it. This directory will be your `$DATA_DIR`. In case there's not
+   enough space on your hard drive, the data directory can also point to an external harddrive.
+4. Run `./dex-net/build_gpu_docker.sh` from `$WORKING_DIR`
+5. Set the variable PATH_DSET in `$WORKING_DIR/dex-net/run_docker.sh` to your `$DATA_DIR`.
+6. Run `./run_docker.sh` from `$WORKING_DIR/dex-net/`. You should now be within the docker container. 
+   Your `$DATA_DIR` should be accessible via "/data" within the docker container.
+   
+### Recreate the PerfectPredictions
 
-__Documentation is work in progress__
+In order to re-create the PerfectPrediction subset with the original pipeline (without the reprojection), run
 
+```
+python tools/render_dataset
+```
+this creates a folder `/data/Recreated_grasps/` containing a DexNet dataset. To evaluate the performance, you need to
+use the [gqcnn repository](https://github.com/anmakon/gqcnn).
+
+### Reprojections of the Perfect Predictions from variable oblique camera viewpoints 
+
+In order to re-create the PerfectPrediction subset with the original pipeline (without the reprojection), run
+
+```
+python tools/open3d_reprojection.py --dir $DATUM_$ELEV --elev $ELEV
+```
+
+`$ELEV` specifies the elevation angle (= the angle of the new camera direction). Set `visualise_mesh = True` if you 
+to visualise the mesh after reconstruction. To evaluate the performance, you need to
+use the [gqcnn repository](https://github.com/anmakon/gqcnn).
+
+--------------------------------
+
+(*) In case you want to generate more grasps than the 10 "PerfectPredictions", you need to download the full 
+[dexnet_2 meshes](https://berkeley.app.box.com/s/eaq37px77jxktr8ggti016pr3gpudp9l) dataset into your _data directory_.
+If you want to compare it to the original dataset, make sure to also download the
+[dexnet_2 images](https://berkeley.app.box.com/s/6mnb2bzi5zfa7qpwyn7uq5atb7vbztng/folder/25803680060) dataset
+into your _data directory_.
+
+
+------------------------------------------------------------
 ---------------------------------------------------------------
 
 ## Links
