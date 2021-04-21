@@ -51,7 +51,7 @@ class DexNetVisualizer3D(Visualizer3D):
     Dex-Net extension of the base Mayavi-based 3D visualization tools
     """
     @staticmethod
-    def gripper(gripper, grasp, T_obj_world, color=(0.5, 0.5, 0.5)):
+    def gripper(gripper, grasp, T_obj_world, color=(0.5, 0.5, 0.5), T_camera_world = None):
         """ Plots a robotic gripper in a pose specified by a particular grasp object.
 
         Parameters
@@ -69,7 +69,10 @@ class DexNetVisualizer3D(Visualizer3D):
         T_gripper_world = T_obj_world * T_gripper_obj
         T_mesh_world = T_gripper_world * gripper.T_mesh_gripper.inverse()        
         T_mesh_world = T_mesh_world.as_frames('obj', 'world')
-        Visualizer3D.mesh(gripper.mesh.trimesh, T_mesh_world, style='surface', color=color)
+        Visualizer3D.mesh(gripper.mesh.trimesh, T_mesh_world=T_mesh_world, style='surface', color=color)
+        Visualizer3D.pose(T_mesh_world)
+        if T_camera_world is not None:
+            Visualizer3D.pose(T_camera_world)
 
     @staticmethod
     def grasp(grasp, T_obj_world=RigidTransform(from_frame='obj', to_frame='world'),

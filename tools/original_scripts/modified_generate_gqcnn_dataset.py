@@ -7,10 +7,12 @@ hereby granted, provided that the above copyright notice, this paragraph and the
 paragraphs appear in all copies, modifications, and distributions. Contact The Office of Technology
 Licensing, UC Berkeley, 2150 Shattuck Avenue, Suite 510, Berkeley, CA 94720-1620, (510) 643-
 7201, otl@berkeley.edu, http://ipira.berkeley.edu/industry-info for commercial licensing opportunities.
+
 IN NO EVENT SHALL REGENTS BE LIABLE TO ANY PARTY FOR DIRECT, INDIRECT, SPECIAL,
 INCIDENTAL, OR CONSEQUENTIAL DAMAGES, INCLUDING LOST PROFITS, ARISING OUT OF
 THE USE OF THIS SOFTWARE AND ITS DOCUMENTATION, EVEN IF REGENTS HAS BEEN
 ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 REGENTS SPECIFICALLY DISCLAIMS ANY WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
 THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
 PURPOSE. THE SOFTWARE AND ACCOMPANYING DOCUMENTATION, IF ANY, PROVIDED
@@ -19,9 +21,11 @@ MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 """
 """
 Generates datasets of synthetic point clouds, grasps, and grasp robustness metrics from a Dex-Net HDF5 database for GQ-CNN training.
+
 Author
 ------
 Jeff Mahler
+
 YAML Configuration File Parameters
 ----------------------------------
 database_name : str
@@ -51,8 +55,10 @@ from autolab_core import Point, RigidTransform, YamlConfig
 import autolab_core.utils as utils
 from gqcnn.grasping import Grasp2D
 from visualization import Visualizer2D as vis2d
-from meshpy import ObjFile, RenderMode, SceneObject, UniformPlanarWorksurfaceImageRandomVariable
+from meshpy import ObjFile, StablePoseFile, RenderMode, SceneObject, UniformPlanarWorksurfaceImageRandomVariable
 from perception import CameraIntrinsics, BinaryImage, DepthImage
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 
 from dexnet.constants import READ_ONLY_ACCESS
 from dexnet.database import Hdf5Database
@@ -72,17 +78,21 @@ SEED = 197561
 # name of the grasp cache file
 CACHE_FILENAME = 'grasp_cache.pkl'
 
+# Variables for creating a smaller dataset
+CREATE_SUBSET = True
+INDEX_START = 0
+INDEX_END = 1
+RESCALING_FACTOR = 1  
+SAVE_ONE_OBJECT = True 
 
 class GraspInfo(object):
     """ Struct to hold precomputed grasp attributes.
     For speeding up dataset generation.
     """
-
     def __init__(self, grasp, collision_free, phi=0.0):
         self.grasp = grasp
         self.collision_free = collision_free
         self.phi = phi
-
 
 def generate_gqcnn_dataset(dataset_path,
                            database,
@@ -92,6 +102,7 @@ def generate_gqcnn_dataset(dataset_path,
                            config):
     """
     Generates a GQ-CNN TensorDataset for training models with new grippers, quality metrics, objects, and cameras.
+
     Parameters
     ----------
     dataset_path : str
@@ -106,16 +117,18 @@ def generate_gqcnn_dataset(dataset_path,
         name of the gripper to use
     config : :obj:`autolab_core.YamlConfig`
         other parameters for dataset generation
+
     Notes
     -----
     Required parameters of config are specified in Other Parameters
+
     Other Parameters
-    ----------------
+    ----------------    
     images_per_stable_pose : int
         number of object and camera poses to sample for each stable pose
     stable_pose_min_p : float
         minimum probability of occurrence for a stable pose to be used in data generation (used to prune bad stable poses
-
+    
     gqcnn/crop_width : int
         width, in pixels, of crop region around each grasp center, before resize (changes the size of the region seen by the GQ-CNN)
     gqcnn/crop_height : int
@@ -124,12 +137,14 @@ def generate_gqcnn_dataset(dataset_path,
         width, in pixels,  of final transformed grasp image for input to the GQ-CNN (defaults to 32)
     gqcnn/final_height : int
         height, in pixels,  of final transformed grasp image for input to the GQ-CNN (defaults to 32)
+
     table_alignment/max_approach_table_angle : float
         max angle between the grasp axis and the table normal when the grasp approach is maximally aligned with the table normal
     table_alignment/max_approach_offset : float
         max deviation from perpendicular approach direction to use in grasp collision checking
     table_alignment/num_approach_offset_samples : int
         number of approach samples to use in collision checking
+
     collision_checking/table_offset : float
         max allowable interpenetration between the gripper and table to be considered collision free
     collision_checking/table_mesh_filename : str
@@ -138,10 +153,12 @@ def generate_gqcnn_dataset(dataset_path,
         distance, in meters, between the approach pose and final grasp pose along the grasp axis
     collision_checking/delta_approach : float
         amount, in meters, to discretize the straight-line path from the gripper approach pose to the final grasp pose
+
     tensors/datapoints_per_file : int
         number of datapoints to store in each unique tensor file on disk
     tensors/fields : :obj:`dict`
         dictionary mapping field names to dictionaries specifying the data type, height, width, and number of channels for each tensor
+
     debug : bool
         True (or 1) if the random seed should be set to enforce deterministic behavior, False (0) otherwise
     vis/candidate_grasps : bool
@@ -156,7 +173,7 @@ def generate_gqcnn_dataset(dataset_path,
     gripper = RobotGripper.load(gripper_name)
     image_samples_per_stable_pose = config['images_per_stable_pose']
     stable_pose_min_p = config['stable_pose_min_p']
-
+    
     # read gqcnn params
     gqcnn_params = config['gqcnn']
     im_crop_height = gqcnn_params['crop_height']
@@ -169,7 +186,9 @@ def generate_gqcnn_dataset(dataset_path,
     # open database
     dataset_names = target_object_keys.keys()
     datasets = [database.dataset(dn) for dn in dataset_names]
-    datasets = [dataset.subset(0, 1) for dataset in datasets]
+
+    if CREATE_SUBSET:
+        datasets = [dataset.subset(INDEX_START,INDEX_END) for dataset in datasets]
 
     # set target objects
     for dataset in datasets:
@@ -190,7 +209,7 @@ def generate_gqcnn_dataset(dataset_path,
         phi_inc = max_grasp_approach_offset - min_grasp_approach_offset + 1
     else:
         phi_inc = (max_grasp_approach_offset - min_grasp_approach_offset) / (num_grasp_approach_samples - 1)
-
+                                                            
     phi = min_grasp_approach_offset
     while phi <= max_grasp_approach_offset:
         phi_offsets.append(phi)
@@ -206,7 +225,7 @@ def generate_gqcnn_dataset(dataset_path,
     if not os.path.isabs(table_mesh_filename):
         table_mesh_filename = os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', table_mesh_filename)
     table_mesh = ObjFile(table_mesh_filename).read()
-
+    
     # set tensor dataset config
     tensor_config = config['tensors']
     tensor_config['fields']['depth_ims_tf_table']['height'] = im_final_height
@@ -219,8 +238,8 @@ def generate_gqcnn_dataset(dataset_path,
     dataset = datasets[0]
     obj_keys = dataset.object_keys
     if len(obj_keys) == 0:
-        raise ValueError('No valid objects in dataset %s' % (dataset.name))
-
+        raise ValueError('No valid objects in dataset %s' %(dataset.name))
+    
     obj = dataset[obj_keys[0]]
     grasps = dataset.grasps(obj.key, gripper=gripper.name)
     grasp_metrics = dataset.grasp_metrics(obj.key, grasps, gripper=gripper.name)
@@ -259,13 +278,13 @@ def generate_gqcnn_dataset(dataset_path,
         logging.info('Loading grasp candidates from file')
         candidate_grasps_dict = pkl.load(open(grasp_cache_filename, 'rb'))
     # otherwise re-compute by reading from the database and enforcing constraints
-    else:
+    else:        
         # create grasps dict
         candidate_grasps_dict = {}
-
+        
         # loop through datasets and objects
         for dataset in datasets:
-            logging.info('Reading dataset %s' % (dataset.name))
+            logging.info('Reading dataset %s' %(dataset.name))
             for obj in dataset:
                 if obj.key not in target_object_keys[dataset.name]:
                     continue
@@ -286,50 +305,46 @@ def generate_gqcnn_dataset(dataset_path,
 
                         # setup table in collision checker
                         T_obj_stp = stable_pose.T_obj_table.as_frames('obj', 'stp')
-                        T_obj_table = obj.mesh.get_T_surface_obj(T_obj_stp, delta=table_offset).as_frames('obj',
-                                                                                                          'table')
+                        T_obj_table = obj.mesh.get_T_surface_obj(T_obj_stp, delta=table_offset).as_frames('obj', 'table')
                         T_table_obj = T_obj_table.inverse()
+
                         collision_checker.set_table(table_mesh_filename, T_table_obj)
 
                         # read grasp and metrics
                         grasps = dataset.grasps(obj.key, gripper=gripper.name)
-                        logging.info(
-                            'Aligning %d grasps for object %s in stable %s' % (len(grasps), obj.key, stable_pose.id))
+                        logging.info('Aligning %d grasps for object %s in stable %s' %(len(grasps), obj.key, stable_pose.id))
 
                         # align grasps with the table
                         aligned_grasps = [grasp.perpendicular_table(stable_pose) for grasp in grasps]
 
                         # check grasp validity
-                        logging.info('Checking collisions for %d grasps for object %s in stable %s' % (
-                        len(grasps), obj.key, stable_pose.id))
+                        logging.info('Checking collisions for %d grasps for object %s in stable %s' %(len(grasps), obj.key, stable_pose.id))
                         for aligned_grasp in aligned_grasps:
                             # check angle with table plane and skip unaligned grasps
                             _, grasp_approach_table_angle, _ = aligned_grasp.grasp_angles_from_stp_z(stable_pose)
                             perpendicular_table = (np.abs(grasp_approach_table_angle) < max_grasp_approach_table_angle)
-                            if not perpendicular_table:
+                            if not perpendicular_table: 
                                 continue
 
                             # check whether any valid approach directions are collision free
                             collision_free = False
                             for phi_offset in phi_offsets:
                                 rotated_grasp = aligned_grasp.grasp_y_axis_offset(phi_offset)
-                                collides = collision_checker.collides_along_approach(rotated_grasp, approach_dist,
-                                                                                     delta_approach)
+                                collides = collision_checker.collides_along_approach(rotated_grasp, approach_dist, delta_approach)
                                 if not collides:
                                     collision_free = True
                                     break
-
+                    
                             # store if aligned to table
-                            candidate_grasps_dict[obj.key][stable_pose.id].append(
-                                GraspInfo(aligned_grasp, collision_free))
+                            candidate_grasps_dict[obj.key][stable_pose.id].append(GraspInfo(aligned_grasp, collision_free))
 
                             # visualize if specified
                             if collision_free and config['vis']['candidate_grasps']:
-                                logging.info('Grasp %d' % (aligned_grasp.id))
+                                logging.info('Grasp %d' %(aligned_grasp.id))
                                 vis.figure()
                                 vis.gripper_on_object(gripper, aligned_grasp, obj, stable_pose.T_obj_world)
                                 vis.show()
-
+                                
         # save to file
         logging.info('Saving to file')
         pkl.dump(candidate_grasps_dict, open(grasp_cache_filename, 'wb'))
@@ -343,32 +358,53 @@ def generate_gqcnn_dataset(dataset_path,
     cur_pose_label = 0
     cur_obj_label = 0
     cur_image_label = 0
-
+                
     # render images for each stable pose of each object in the dataset
     render_modes = [RenderMode.SEGMASK, RenderMode.DEPTH_SCENE]
     for dataset in datasets:
-        logging.info('Generating data for dataset %s' % (dataset.name))
-
+        logging.info('Generating data for dataset %s' %(dataset.name))
+        
         # iterate through all object keys
         object_keys = dataset.object_keys
         for obj_key in object_keys:
             obj = dataset[obj_key]
+            obj.mesh.rescale(RESCALING_FACTOR)
             if obj.key not in target_object_keys[dataset.name]:
                 continue
 
             # read in the stable poses of the mesh
             stable_poses = dataset.stable_poses(obj.key)
+
+            if SAVE_ONE_OBJECT:
+		# Save object mesh
+                savefile = ObjFile("./data/meshes/dexnet/"+obj.key+".obj")
+                savefile.write(obj.mesh) 
+		# Save stable poses
+                save_stp = StablePoseFile("./data/meshes/dexnet/"+obj.key+".stp")
+                save_stp.write(stable_poses)
+                candidate_grasp_info = candidate_grasps_dict[obj.key][stable_poses[0].id]
+		print("Stable pose id:",stable_poses[0].id)
+                candidate_grasps = [g.grasp for g in candidate_grasp_info]
+		# Save candidate grasp info
+		pkl.dump(candidate_grasps_dict[obj.key], open("./data/meshes/dexnet/"+obj.key+".pkl", 'wb'))
+		# Save grasp metrics
+                grasp_metrics = dataset.grasp_metrics(obj.key, candidate_grasps, gripper=gripper.name)
+                write_metrics = json.dumps(grasp_metrics)
+                f = open("./data/meshes/dexnet/"+obj.key+".json","w")
+                f.write(write_metrics)
+                f.close()
+
             for i, stable_pose in enumerate(stable_poses):
 
                 # render images if stable pose is valid
                 if stable_pose.p > stable_pose_min_p:
                     # log progress
-                    logging.info('Rendering images for object %s in %s' % (obj.key, stable_pose.id))
+                    logging.info('Rendering images for object %s in %s' %(obj.key, stable_pose.id))
 
                     # add to category maps
                     if obj.key not in obj_category_map.keys():
                         obj_category_map[obj.key] = cur_obj_label
-                    pose_category_map['%s_%s' % (obj.key, stable_pose.id)] = cur_pose_label
+                    pose_category_map['%s_%s' %(obj.key, stable_pose.id)] = cur_pose_label
 
                     # read in candidate grasps and metrics
                     candidate_grasp_info = candidate_grasps_dict[obj.key][stable_pose.id]
@@ -388,34 +424,50 @@ def generate_gqcnn_dataset(dataset_path,
                                                                       env_rv_params,
                                                                       stable_pose=stable_pose,
                                                                       scene_objs=scene_objs)
-
+                    
                     render_start = time.time()
                     render_samples = urv.rvs(size=image_samples_per_stable_pose)
                     render_stop = time.time()
-                    logging.info('Rendering images took %.3f sec' % (render_stop - render_start))
+                    logging.info('Rendering images took %.3f sec' %(render_stop - render_start))
 
                     # visualize
                     if config['vis']['rendered_images']:
                         d = int(np.ceil(np.sqrt(image_samples_per_stable_pose)))
 
-                        # binary
+                        #segmask
                         vis2d.figure()
                         for j, render_sample in enumerate(render_samples):
-                            vis2d.subplot(d, d, j + 1)
+                            vis2d.subplot(d,d,j+1)
                             vis2d.imshow(render_sample.renders[RenderMode.SEGMASK].image)
 
                         # depth table
                         vis2d.figure()
                         for j, render_sample in enumerate(render_samples):
-                            vis2d.subplot(d, d, j + 1)
+                            vis2d.subplot(d,d,j+1)
                             vis2d.imshow(render_sample.renders[RenderMode.DEPTH_SCENE].image)
                         vis2d.show()
 
+                        if False:
+                            # binary
+                            fig = plt.figure(figsize=(8,8))
+                            fig.suptitle('SEGMASK')
+                            for j, render_sample in enumerate(render_samples):
+                                plt.subplot(d,d,j+1)
+                                plt.imshow(render_sample.renders[RenderMode.SEGMASK].image.data)
+
+                            # depth table
+                            fig = plt.figure(figsize=(8,8))
+                            fig.suptitle('DEPTH SCENE')
+                            for j, render_sample in enumerate(render_samples):
+                                plt.subplot(d,d,j+1)
+                                plt.imshow(render_sample.renders[RenderMode.DEPTH_SCENE].image.data)
+                            plt.show()
+
                     # tally total amount of data
                     num_grasps = len(candidate_grasps)
-                    num_images = image_samples_per_stable_pose
+                    num_images = image_samples_per_stable_pose 
                     num_save = num_images * num_grasps
-                    logging.info('Saving %d datapoints' % (num_save))
+                    logging.info('Saving %d datapoints' %(num_save))
 
                     # for each candidate grasp on the object compute the projection
                     # of the grasp into image space
@@ -442,7 +494,7 @@ def generate_gqcnn_dataset(dataset_path,
                             # read info
                             grasp = grasp_info.grasp
                             collision_free = grasp_info.collision_free
-
+                            
                             # get the gripper pose
                             T_obj_camera = T_stp_camera * T_obj_stp.as_frames('obj', T_stp_camera.from_frame)
                             grasp_2d = grasp.project_camera(T_obj_camera, shifted_camera_intr)
@@ -462,39 +514,75 @@ def generate_gqcnn_dataset(dataset_path,
                             # resize to image size
                             binary_im_tf = binary_im_tf.resize((im_final_height, im_final_width), interp='nearest')
                             depth_im_tf_table = depth_im_tf_table.resize((im_final_height, im_final_width))
-
+                            
                             # visualize the transformed images
                             if config['vis']['grasp_images']:
+                                grasp_center = Point(depth_im_tf_table.center,
+                                                     frame=final_camera_intr.frame)
+
+                                # plot 2D grasp image
                                 grasp_center = Point(depth_im_tf_table.center,
                                                      frame=final_camera_intr.frame)
                                 tf_grasp_2d = Grasp2D(grasp_center, 0,
                                                       grasp_2d.depth,
                                                       width=gripper.max_width,
-                                                      camera_intr=final_camera_intr)
-
-                                # plot 2D grasp image
+                                                      camera_intr=final_camera_intr) 
+				
                                 vis2d.figure()
-                                vis2d.subplot(2, 2, 1)
+                                vis2d.subplot(2,2,1)
                                 vis2d.imshow(binary_im)
                                 vis2d.grasp(grasp_2d)
-                                vis2d.subplot(2, 2, 2)
+                                vis2d.subplot(2,2,2)
                                 vis2d.imshow(depth_im_table)
                                 vis2d.grasp(grasp_2d)
-                                vis2d.subplot(2, 2, 3)
+                                vis2d.subplot(2,2,3)
                                 vis2d.imshow(binary_im_tf)
                                 vis2d.grasp(tf_grasp_2d)
-                                vis2d.subplot(2, 2, 4)
+                                vis2d.subplot(2,2,4)
                                 vis2d.imshow(depth_im_tf_table)
                                 vis2d.grasp(tf_grasp_2d)
-                                vis2d.title('Coll Free? %d' % (grasp_info.collision_free))
+                                vis2d.title('Coll Free? %d'%(grasp_info.collision_free))
                                 vis2d.show()
 
+                                if False:
+                                    plt.figure(figsize=(8,8))
+                                    plt.subplot(2,2,1)
+                                    plt.imshow(binary_im.data)
+                                    plt.title('Binary Image')
+                                
+                                    plt.subplot(2,2,2)
+                                    plt.imshow(depth_im_table.data)
+ 
+                                    plt.subplot(2,2,3)
+                                    plt.imshow(binary_im_tf.data)
+
+                                    plt.subplot(2,2,4)
+                                    plt.imshow(depth_im_tf_table.data)
+
+                                    plt.title('Coll Free? %d'%(grasp_info.collision_free))
+                                    plt.show()
+                                    plt.close()
+
                                 # plot 3D visualization
-                                vis.figure()
-                                T_obj_world = vis.mesh_stable_pose(obj.mesh.trimesh, stable_pose.T_obj_world, style='surface',
-                                                                   dim=0.5)
-                                vis.gripper(gripper, grasp, T_obj_world, color=(0.3, 0.3, 0.3))
-                                vis.show()
+				# Whooza
+
+
+                                fig = plt.figure()
+				ax = fig.add_subplot(111, projection='3d',transform=T_obj_camera)
+
+				object_vertices = obj.mesh.trimesh.vertices
+
+				table_vertices = table_mesh.trimesh.vertices
+#				ax.plot_trisurf(table_vertices[:,0],table_vertices[:,1],triangles=table_mesh.trimesh.faces,Z=table_vertices[:,2],color='g')
+				ax.plot_trisurf(object_vertices[:,0],object_vertices[:,1],triangles = obj.mesh.trimesh.faces, Z=object_vertices[:,2],color='b')
+#				Axes3D(fig,rect=(-0.2,-0.2,0.4,0.4),transform=T_obj_camera) 
+				plt.show()
+
+                                if False:
+                                    vis.figure()
+                                    T_obj_world = vis.mesh_stable_pose(obj.mesh.trimesh, stable_pose.T_obj_world, style='surface', dim=0.5)
+                                    vis.gripper(gripper, grasp, T_obj_world, color=(0.3,0.3,0.3))
+                                    vis.show()
 
                             # form hand pose array
                             hand_pose = np.r_[grasp_2d.center.y,
@@ -504,6 +592,7 @@ def generate_gqcnn_dataset(dataset_path,
                                               grasp_2d.center.y - shifted_camera_intr.cy,
                                               grasp_2d.center.x - shifted_camera_intr.cx,
                                               grasp_2d.width_px]
+         
 
                             # store to data buffers
                             tensor_datapoint['depth_ims_tf_table'] = depth_im_tf_table.raw_data
@@ -543,13 +632,11 @@ def generate_gqcnn_dataset(dataset_path,
     pose_cat_filename = os.path.join(output_dir, 'pose_category_map.json')
     json.dump(pose_category_map, open(pose_cat_filename, 'w'))
 
-
 if __name__ == '__main__':
     logging.getLogger().setLevel(logging.INFO)
 
     # parse args
-    parser = argparse.ArgumentParser(
-        description='Create a GQ-CNN training dataset from a dataset of 3D object models and grasps in a Dex-Net database')
+    parser = argparse.ArgumentParser(description='Create a GQ-CNN training dataset from a dataset of 3D object models and grasps in a Dex-Net database')
     parser.add_argument('dataset_path', type=str, default=None, help='name of folder to save the training dataset in')
     parser.add_argument('--config_filename', type=str, default=None, help='configuration file to use')
     args = parser.parse_args()
@@ -576,7 +663,7 @@ if __name__ == '__main__':
     if debug:
         random.seed(SEED)
         np.random.seed(SEED)
-
+        
     # open database
     database = Hdf5Database(config['database_name'],
                             access_level=READ_ONLY_ACCESS)
