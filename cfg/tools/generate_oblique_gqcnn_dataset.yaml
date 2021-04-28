@@ -50,7 +50,7 @@ gqcnn:
 
 # Table alignment constraint parameters
 table_alignment:
-  max_approach_table_angle: 80 # in degrees
+  max_approach_table_angle: 5 # in degrees
   max_approach_offset: 10 # in degrees
   num_approach_offset_samples: 5
 
@@ -59,7 +59,7 @@ collision_checking:
   table_offset: 0.005
   table_mesh_filename: /data/meshes/table.obj
 
-  approach_dist: 0.05
+  approach_dist: 0.1
   delta_approach: 0.005
 
 # Tensor dataset config

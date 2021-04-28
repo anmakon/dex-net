@@ -25,13 +25,12 @@ DATA_DIR = '/data'
 table_file = '/data/meshes/table.obj'
 
 data_dir = '/data/meshes/dexnet/'
-output_dir = DATA_DIR + '/test/'
-CACHE_FILENAME = DATA_DIR + '/20210421_grasp_cache.pkl'
+output_dir = DATA_DIR + '/TEST/'
 
 config = YamlConfig('./cfg/tools/generate_gqcnn_dataset.yaml')
 
 NUM_OBJECTS = 1
-VISUALISE_3D = False
+VISUALISE_3D = True
 SAVE_DEPTH_IMAGES = False
 
 
@@ -50,108 +49,6 @@ def _scale_image(depth):
     integ = scaled.astype(np.uint8)
     integ.resize(size)
     return integ
-
-
-def visualise_sample(sample, candidate_grasp_info, grasp_metrics, cur_image_label=0, cur_pose_label=0,
-                     cur_obj_label=0):
-    """Applying transformations to the images and camera intrinsics.
-    Visualising the binary and depth image of the object.
-    Adding the corresponding values to the dataset"""
-
-    binary_im = sample.renders[RenderMode.SEGMASK].image
-    depth_im_table = sample.renders[RenderMode.DEPTH_SCENE].image
-
-    T_stp_camera = sample.camera.object_to_camera_pose
-    shifted_camera_intr = sample.camera.camera_intr
-
-    cx = depth_im_table.center[1]
-    cy = depth_im_table.center[0]
-
-    # Compute camera intrinsics
-    camera_intr_scale = 32.0 / 96.0
-    cropped_camera_intr = shifted_camera_intr.crop(96, 96, cy, cx)
-    final_camera_intr = cropped_camera_intr.resize(camera_intr_scale)
-    # Iterate through grasps
-    for cnt, grasp_info in enumerate(candidate_grasp_info):
-        grasp = grasp_info.grasp
-        collision_free = grasp_info.collision_free
-
-        # Project grasp coordinates in image
-        T_obj_camera = T_stp_camera * T_obj_stp.as_frames('obj', T_stp_camera.from_frame)
-        grasp_2d = grasp.project_camera(T_obj_camera, shifted_camera_intr)
-
-        # Calculate angle between camera z-axis and grasp axis
-        camera_axis = T_obj_camera.inverse().z_axis
-        grasp_angle = np.abs(np.rad2deg(np.arccos(np.dot(grasp.axis, camera_axis) /
-                                                  (np.linalg.norm(grasp.axis) * np.linalg.norm(camera_axis)))))
-
-        # Threshold angle between camera z-axis and grasp axis as condition for grasp being used (oblique views!)
-        if not 89 < grasp_angle < 91:
-            continue
-
-        if VISUALISE_3D:
-            vis.figure()
-            T_obj_world = vis.mesh_stable_pose(obj.mesh.trimesh,
-                                               stable_pose.T_obj_world, style='surface', dim=0.5)
-            T_camera_world = T_obj_world * T_obj_camera.inverse()
-            vis.gripper(gripper, grasp, T_obj_world, color=(0.3, 0.3, 0.3), T_camera_world=T_camera_world)
-            vis.show()
-
-        # Get translation image distances to grasp
-        dx = cx - grasp_2d.center.x
-        dy = cy - grasp_2d.center.y
-        translation = np.array([dy, dx])
-
-        # Transform, crop and resize image
-        binary_im_tf = binary_im.transform(translation, grasp_2d.angle)
-        depth_im_tf_table = depth_im_table.transform(translation, grasp_2d.angle)
-
-        binary_im_tf = binary_im_tf.crop(96, 96)
-        depth_im_tf_table = depth_im_tf_table.crop(96, 96)
-
-        depth_image = np.asarray(depth_im_tf_table.data)
-        dep_image = Image.fromarray(depth_image).resize((32, 32), resample=Image.BILINEAR)
-        depth_im_tf = np.asarray(dep_image).reshape(32, 32, 1)
-
-        binary_image = np.asarray(binary_im_tf.data)
-        bin_image = Image.fromarray(binary_image).resize((32, 32), resample=Image.BILINEAR)
-        binary_im_tf = np.asarray(bin_image).reshape(32, 32, 1)
-
-        # Bilinear resizing doesn't work within DepthImage - always nearest neighbour! Use PIL Image resizing instead.
-        # binary_im_tf = binary_im_tf.resize((32, 32), interp='bilinear')
-        # depth_im_tf_table = depth_im_tf_table.resize((32, 32), interp='bilinear')
-
-        # Save the depth image for debugging purposes
-        if SAVE_DEPTH_IMAGES:
-            scaled_depth_image = _scale_image(np.asarray(depth_im_tf_table.data))
-            scaled_dep_image = Image.fromarray(scaled_depth_image).resize((32, 32), resample=Image.BILINEAR)
-            scaled_dep_image.resize((300, 300), resample=Image.NEAREST) \
-                .save(output_dir + '/' + str(cur_image_label) + '_' + str(cnt) + '.png')
-
-        # Configure hand pose
-        hand_pose = np.r_[grasp_2d.center.y,
-                          grasp_2d.center.x,
-                          grasp_2d.depth,
-                          grasp_2d.angle,
-                          grasp_2d.center.y - shifted_camera_intr.cy,
-                          grasp_2d.center.x - shifted_camera_intr.cx,
-                          grasp_2d.width_px / 3]
-
-        # Add data to tensor dataset
-        tensor_datapoint['depth_ims_tf_table'] = depth_im_tf
-        tensor_datapoint['obj_masks'] = binary_im_tf
-        tensor_datapoint['hand_poses'] = hand_pose
-        tensor_datapoint['obj_labels'] = cur_obj_label
-        tensor_datapoint['collision_free'] = collision_free
-        tensor_datapoint['pose_labels'] = cur_pose_label
-        tensor_datapoint['image_labels'] = cur_image_label
-
-        # Add metrics to tensor dataset
-        for metric_name, metric_val in grasp_metrics[grasp.id].iteritems():
-            coll_free_metric = (1 * collision_free) * metric_val
-            tensor_datapoint[metric_name] = coll_free_metric
-
-        tensor_dataset.add(tensor_datapoint)
 
 
 parser = argparse.ArgumentParser()
@@ -215,85 +112,6 @@ datasets = [database.dataset(dn) for dn in dataset_names]
 datasets = [dataset.subset(0, NUM_OBJECTS) for dataset in datasets]
 
 gripper = RobotGripper.load(config['gripper'])
-# grasp_cache_filename = os.path.join(output_dir, CACHE_FILENAME)
-grasp_cache_filename = CACHE_FILENAME
-if os.path.exists(grasp_cache_filename):
-    logging.info('Loading grasp candidates from file')
-    candidate_grasps_dict = pkl.load(open(grasp_cache_filename, 'rb'))
-# otherwise re-compute by reading from the database and enforcing constraints
-else:
-    # create grasps dict
-    candidate_grasps_dict = {}
-
-    # loop through datasets and objects
-    for dataset in datasets:
-        logging.info('Reading dataset %s' % (dataset.name))
-        for obj in dataset:
-
-            # init candidate grasp storage
-            candidate_grasps_dict[obj.key] = {}
-
-            # setup collision checker
-            collision_checker = GraspCollisionChecker(gripper)
-            collision_checker.set_graspable_object(obj)
-
-            # read in the stable poses of the mesh
-            stable_poses = dataset.stable_poses(obj.key)
-            for i, stable_pose in enumerate(stable_poses):
-                # render images if stable pose is valid
-                if stable_pose.p > stable_pose_min_p:
-                    candidate_grasps_dict[obj.key][stable_pose.id] = []
-
-                    # setup table in collision checker
-                    T_obj_stp = stable_pose.T_obj_table.as_frames('obj', 'stp')
-                    T_obj_table = obj.mesh.get_T_surface_obj(T_obj_stp, delta=table_offset).as_frames('obj', 'table')
-                    T_table_obj = T_obj_table.inverse()
-
-                    collision_checker.set_table(table_mesh_filename, T_table_obj)
-
-                    # read grasp and metrics
-                    grasps = dataset.grasps(obj.key, gripper=gripper.name)
-                    logging.info('Aligning %d grasps for object %s in stable %s' %
-                                 (len(grasps), obj.key, stable_pose.id))
-
-                    # align grasps with the table
-                    aligned_grasps = [grasp.perpendicular_table(stable_pose) for grasp in grasps]
-
-                    # check grasp validity
-                    logging.info('Checking collisions for %d grasps for object %s in stable %s' % (
-                        len(grasps), obj.key, stable_pose.id))
-                    for aligned_grasp in grasps:
-                        # check angle with table plane and skip unaligned grasps
-                        _, grasp_approach_table_angle, _ = aligned_grasp.grasp_angles_from_stp_z(stable_pose)
-                        perpendicular_table = (np.abs(grasp_approach_table_angle) < max_grasp_approach_table_angle)
-                        if not perpendicular_table:
-                            continue
-
-                        # check whether any valid approach directions are collision free
-                        collision_free = False
-                        for phi_offset in phi_offsets:
-                            rotated_grasp = aligned_grasp.grasp_y_axis_offset(phi_offset)
-                            collides = collision_checker.collides_along_approach(rotated_grasp, approach_dist,
-                                                                                 delta_approach)
-                            if not collides:
-                                aligned_grasp = rotated_grasp
-                                collision_free = True
-                                break
-
-                        # store if aligned to table
-                        candidate_grasps_dict[obj.key][stable_pose.id].append(GraspInfo(aligned_grasp, collision_free))
-
-                        # visualize if specified
-                        # if collision_free and config['vis']['candidate_grasps']:
-                        #     logging.info('Grasp %d' % (aligned_grasp.id))
-                        #     vis.figure()
-                        #     vis.gripper_on_object(gripper, aligned_grasp, obj, stable_pose.T_obj_world)
-                        #     vis.show()
-
-    # save to file
-    logging.info('Saving to file')
-    pkl.dump(candidate_grasps_dict, open(grasp_cache_filename, 'wb'))
-
 
 if elev is not None:
     print("Elevation angle is being set to %d" % elev)
@@ -329,8 +147,16 @@ for dataset in datasets:
 
     # iterate through all object keys
     object_keys = dataset.object_keys
+
     for obj_key in object_keys:
         obj = dataset[obj_key]
+        grasps = dataset.grasps(obj.key, gripper=gripper.name)
+
+        # setup collision checker
+        collision_checker = GraspCollisionChecker(gripper)
+        collision_checker.set_graspable_object(obj)
+
+        # read in the stable poses of the mesh
         stable_poses = dataset.stable_poses(obj.key)
 
         # Iterate through stable poses
@@ -342,13 +168,13 @@ for dataset in datasets:
                 obj_category_map[obj.key] = cur_obj_label
             pose_category_map['%s_%s' % (obj.key, stable_pose.id)] = cur_pose_label
 
-            # read in candidate grasps and metrics
-            candidate_grasp_info = candidate_grasps_dict[obj.key][stable_pose.id]
-            candidate_grasps = [g.grasp for g in candidate_grasp_info]
-            grasp_metrics = dataset.grasp_metrics(obj.key, candidate_grasps, gripper=gripper.name)
-
+            # setup table in collision checker
             T_obj_stp = stable_pose.T_obj_table.as_frames('obj', 'stp')
+            T_obj_table = obj.mesh.get_T_surface_obj(T_obj_stp, delta=table_offset).as_frames('obj', 'table')
+            T_table_obj = T_obj_table.inverse()
             T_obj_stp = obj.mesh.get_T_surface_obj(T_obj_stp)
+
+            collision_checker.set_table(table_mesh_filename, T_table_obj)
 
             # sample images from random variable
             T_table_obj = RigidTransform(from_frame='table', to_frame='obj')
@@ -362,16 +188,124 @@ for dataset in datasets:
                                                               scene_objs=scene_objs,
                                                               stable_pose=stable_pose)
             # Render images
-            if config['images_per_stable_pose'] == 1:
-                sample = urv.sample()
-                visualise_sample(sample, candidate_grasp_info, grasp_metrics,
-                                 cur_image_label, cur_pose_label, cur_obj_label)
-                cur_image_label += 1
-            else:
-                render_samples = urv.rvs(size=config['images_per_stable_pose'])
-                for render_sample in render_samples:
-                    visualise_sample(render_sample, candidate_grasp_info, grasp_metrics,
-                                     cur_image_label, cur_pose_label, cur_obj_label)
+            render_samples = urv.rvs(size=config['images_per_stable_pose'])
+            for sample in render_samples:
+                T_stp_camera = sample.camera.object_to_camera_pose
+                T_obj_camera = T_stp_camera * T_obj_stp.as_frames('obj', T_stp_camera.from_frame)
+                # T_camera_stp = sample.camera.object_to_camera_pose.inverse()
+                # z_axis_in_stp = np.dot(T_camera_stp.matrix, np.array((0, 0, -1, 1)).reshape(4, 1))
+                z_axis_in_obj = np.dot(T_obj_camera.inverse().matrix, np.array((0, 0, -1, 1)).reshape(4, 1))
+                z_axis = z_axis_in_obj[0:3].squeeze() / np.linalg.norm(z_axis_in_obj[0:3].squeeze())
+                # aligned_grasps = [grasp.perpendicular_table(stable_pose) for grasp in grasps]
+                # for grasp in grasps:
+                #     camera_test = grasp.perpendicular_table(z_axis)
+                #     table_test = grasp.perpendicular_table(stable_pose)
+                #     vis.figure()
+                #     T_obj_world = vis.mesh_stable_pose(obj.mesh.trimesh,
+                #                                        stable_pose.T_obj_world, style='surface', dim=0.5)
+                #     T_camera_world = T_obj_world * T_obj_camera.inverse()
+                #     vis.gripper(gripper, camera_test, T_obj_world, color=(0.3, 0.3, 0.3))
+                #     vis.gripper(gripper, table_test, T_obj_world, color=(0.9, 0.9, 0.9))
+                #     vis.show()
+                aligned_grasps = [grasp.perpendicular_table(z_axis) for grasp in grasps]
+                # aligned_grasps = [grasp.perpendicular_table(stable_pose) for grasp in grasps]
+
+                binary_im = sample.renders[RenderMode.SEGMASK].image
+                depth_im_table = sample.renders[RenderMode.DEPTH_SCENE].image
+
+                shifted_camera_intr = sample.camera.camera_intr
+
+                cx = depth_im_table.center[1]
+                cy = depth_im_table.center[0]
+
+                # Compute camera intrinsics
+                camera_intr_scale = 32.0 / 96.0
+                cropped_camera_intr = shifted_camera_intr.crop(96, 96, cy, cx)
+                final_camera_intr = cropped_camera_intr.resize(camera_intr_scale)
+                # Iterate through grasps
+                for cnt, aligned_grasp in enumerate(aligned_grasps):
+                    # _, grasp_approach_table_angle, _ = aligned_grasp.grasp_angles_from_stp_z(stable_pose)
+                    _, grasp_approach_table_angle, _ = aligned_grasp.grasp_angles_from_camera_z(T_obj_camera)
+                    perpendicular_table = (np.abs(grasp_approach_table_angle) < max_grasp_approach_table_angle)
+                    if not perpendicular_table:
+                        continue
+
+                    # check whether any valid approach directions are collision free
+                    collision_free = False
+                    for phi_offset in phi_offsets:
+                        aligned_grasp.grasp_y_axis_offset(phi_offset)
+                        collides = collision_checker.collides_along_approach(aligned_grasp, approach_dist,
+                                                                             delta_approach)
+                        if not collides:
+                            collision_free = True
+                            break
+
+                    # Load grasp metrics
+                    grasp_metrics = dataset.grasp_metrics(obj.key, aligned_grasps, gripper=gripper.name)
+
+                    # Project grasp coordinates in image
+                    grasp_2d = aligned_grasp.project_camera(T_obj_camera, shifted_camera_intr)
+
+                    if VISUALISE_3D:
+                        vis.figure()
+                        T_obj_world = vis.mesh_stable_pose(obj.mesh.trimesh,
+                                                           stable_pose.T_obj_world, style='surface', dim=0.5)
+                        T_camera_world = T_obj_world * T_obj_camera.inverse()
+                        vis.gripper(gripper, aligned_grasp, T_obj_world, color=(0.3, 0.3, 0.3),
+                                    T_camera_world=T_camera_world)
+                        vis.show()
+
+                    # Get translation image distances to grasp
+                    dx = cx - grasp_2d.center.x
+                    dy = cy - grasp_2d.center.y
+                    translation = np.array([dy, dx])
+
+                    # Transform, crop and resize image
+                    binary_im_tf = binary_im.transform(translation, grasp_2d.angle)
+                    depth_im_tf_table = depth_im_table.transform(translation, grasp_2d.angle)
+
+                    binary_im_tf = binary_im_tf.crop(96, 96)
+                    depth_im_tf_table = depth_im_tf_table.crop(96, 96)
+
+                    depth_image = np.asarray(depth_im_tf_table.data)
+                    dep_image = Image.fromarray(depth_image).resize((32, 32), resample=Image.BILINEAR)
+                    depth_im_tf = np.asarray(dep_image).reshape(32, 32, 1)
+
+                    binary_image = np.asarray(binary_im_tf.data)
+                    bin_image = Image.fromarray(binary_image).resize((32, 32), resample=Image.BILINEAR)
+                    binary_im_tf = np.asarray(bin_image).reshape(32, 32, 1)
+
+                    # Save the depth image for debugging purposes
+                    if SAVE_DEPTH_IMAGES:
+                        scaled_depth_image = _scale_image(np.asarray(depth_im_tf_table.data))
+                        scaled_dep_image = Image.fromarray(scaled_depth_image).resize((32, 32), resample=Image.BILINEAR)
+                        scaled_dep_image.resize((300, 300), resample=Image.NEAREST) \
+                            .save(output_dir + '/' + str(cur_image_label) + '_' + str(cnt) + '.png')
+
+                    # Configure hand pose
+                    hand_pose = np.r_[grasp_2d.center.y,
+                                      grasp_2d.center.x,
+                                      grasp_2d.depth,
+                                      grasp_2d.angle,
+                                      grasp_2d.center.y - shifted_camera_intr.cy,
+                                      grasp_2d.center.x - shifted_camera_intr.cx,
+                                      grasp_2d.width_px / 3]
+
+                    # Add data to tensor dataset
+                    tensor_datapoint['depth_ims_tf_table'] = depth_im_tf
+                    tensor_datapoint['obj_masks'] = binary_im_tf
+                    tensor_datapoint['hand_poses'] = hand_pose
+                    tensor_datapoint['obj_labels'] = cur_obj_label
+                    tensor_datapoint['collision_free'] = collision_free
+                    tensor_datapoint['pose_labels'] = cur_pose_label
+                    tensor_datapoint['image_labels'] = cur_image_label
+
+                    # Add metrics to tensor dataset
+                    for metric_name, metric_val in grasp_metrics[aligned_grasp.id].iteritems():
+                        coll_free_metric = (1 * collision_free) * metric_val
+                        tensor_datapoint[metric_name] = coll_free_metric
+
+                    tensor_dataset.add(tensor_datapoint)
                     cur_image_label += 1
             cur_pose_label += 1
             gc.collect()
