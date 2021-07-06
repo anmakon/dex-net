@@ -1,0 +1,25 @@
+# Dockerfile for dexnet with gpu
+FROM dexnet:gpu
+
+RUN apt-get update && \
+	apt-get install -y openjdk-8-jdk && \
+	apt-get install -y ant && \
+	apt-get clean;
+
+RUN apt-get update && \
+	apt-get install ca-certificates-java && \
+	apt-get clean && \
+	update-ca-certificates -f;
+
+ENV JAVA_HOME /usr/lib/jvm/java-8-openjdk-amd64/
+RUN export JAVA_HOME
+
+RUN pip install triangle tqdm
+
+ARG USER_ID
+ARG GROUP_ID
+
+RUN addgroup --gid $GROUP_ID user
+RUN adduser --disabled-password --gecos '' --uid $USER_ID --gid $GROUP_ID user
+
+USER user
