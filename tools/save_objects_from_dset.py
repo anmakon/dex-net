@@ -5,6 +5,7 @@ import csv
 import os
 import numpy as np
 import logging
+import open3d as o3d
 
 from autolab_core import YamlConfig
 from meshpy import ObjFile, StablePoseFile
@@ -19,7 +20,7 @@ DATA_DIR = '/data'
 Script to save dexnet objects for dexnet database to file.
 Object, pose and grasp can be specified via the script 
 dexnet/tools/create_validation_pointers.py.
-Data files are being saved to dexnet/data/meshes/dexnet.
+Data files are being saved to /data/meshes/dexnet.
 With --num, the maximum amount of grasps in one subset (KIT and 3DNet)
 can be specified.
 """
@@ -186,12 +187,18 @@ def save_dexnet_objects(output_path, database, target_object_keys, config, point
                         break
 
                 i += 1
-            counter += 1
+
             if found:
                 # Save files
                 print("Saving file: ", obj.key)
                 savefile = ObjFile(DATA_DIR + "/meshes/dexnet/" + obj.key + ".obj")
                 savefile.write(obj.mesh)
+                # print("Vertices:", obj.mesh.vertices.shape)
+                # print("Triangles:", obj.mesh.triangles.shape)
+                mesh = o3d.geometry.TriangleMesh(o3d.utility.Vector3dVector(obj.mesh.vertices),
+                                                 o3d.utility.Vector3iVector(obj.mesh.triangles))
+                o3d.io.write_triangle_mesh(DATA_DIR + '/PerfectPredictions/3D_meshes/' + "%05d_%03d.ply" %
+                                           (pointers.tensor[counter], pointers.array[counter]), mesh)
                 # Save stable poses
                 save_stp = StablePoseFile(DATA_DIR + "/meshes/dexnet/" + obj.key + ".stp")
                 save_stp.write(stable_poses)
@@ -205,7 +212,7 @@ def save_dexnet_objects(output_path, database, target_object_keys, config, point
                 f = open(DATA_DIR + "/meshes/dexnet/" + obj.key + ".json", "w")
                 f.write(write_metrics)
                 f.close()
-
+            counter += 1
             if num is not None and counter >= num:
                 break
     with open(DATA_DIR + '/meshes/dexnet/files.csv', 'w') as csv_file:
@@ -215,7 +222,7 @@ def save_dexnet_objects(output_path, database, target_object_keys, config, point
 
 
 class ValidationPointers(object):
-    def __init__(self, filename=DATA_DIR + '/generated_val_indices.txt'):
+    def __init__(self, filename=DATA_DIR + '/meshes/generated_val_indices.txt'):
         f = open(filename, 'rb')
         dtype = [('Tensor', int), ('Array', int), ('Obj_id', int),
                  ('Pose_num', int), ('Grasp_num', int), ('Metric', float), ('Depth', float)]
@@ -249,7 +256,7 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.WARNING)
 
     config_filename = "./cfg/tools/generate_gqcnn_dataset.yaml"
-    output_path = DATA_DIR + "/meshes/dexnet"
+    output_path = DATA_DIR + "/meshes/test"
 
     config = YamlConfig(config_filename)
     database = Hdf5Database(config['database_name'],

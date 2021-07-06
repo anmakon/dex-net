@@ -417,6 +417,34 @@ class ParallelJawPtGrasp3D(PointGrasp):
 
         return grasp_axis_angle, grasp_approach_angle, nu
 
+    def grasp_angles_from_camera_z(self, T_obj_cam):
+        """ Get angles of the the grasp from the table plane:
+        1) the angle between the grasp axis and table normal
+        2) the angle between the grasp approach axis and the table normal
+
+        Parameters
+        ----------
+        stable_pose : :obj:`StablePose` or :obj:`RigidTransform`
+            the stable pose to compute the angles for
+
+        Returns
+        -------
+        psi : float
+            grasp y axis rotation from z axis in stable pose
+        phi : float
+            grasp x axis rotation from z axis in stable pose
+        """
+        T_grasp_obj = self.T_grasp_obj
+
+        T_grasp_cam = T_obj_cam * T_grasp_obj
+
+        stp_z = np.array([0, 0, 1])
+        grasp_axis_angle = np.arccos(stp_z.dot(T_grasp_cam.y_axis))
+        grasp_approach_angle = np.arccos(abs(stp_z.dot(T_grasp_cam.x_axis)))
+        nu = stp_z.dot(T_grasp_cam.z_axis)
+
+        return grasp_axis_angle, grasp_approach_angle, nu
+
     def close_fingers(self, obj, vis = False, check_approach=True, approach_dist = 0.2):
         """ Steps along grasp axis to find the locations of contact with an object
 
@@ -480,7 +508,7 @@ class ParallelJawPtGrasp3D(PointGrasp):
         c2_found, c2 = ParallelJawPtGrasp3D.find_contact(line_of_action2, obj, vis=vis)
 
         if vis:
-            ax = plt.gca(projection = '3d')
+            ax = plt.gca(projection='3d')
             ax.set_xlim3d(0, obj.sdf.dims_[0])
             ax.set_ylim3d(0, obj.sdf.dims_[1])
             ax.set_zlim3d(0, obj.sdf.dims_[2])
@@ -615,35 +643,6 @@ class ParallelJawPtGrasp3D(PointGrasp):
             if contact.normal is None:
                 contact_found = False
         return contact_found, contact
-        
-    def _angle_aligned_with_stable_pose(self, stable_pose):
-        """
-        Returns the y-axis rotation angle that'd allow the current pose to align with stable pose.
-        """    
-        def _argmin(f, a, b, n):
-            #finds the argmax x of f(x) in the range [a, b) with n samples
-            delta = (b - a) / n
-            min_y = f(a)
-            min_x = a
-            for i in range(1, n):
-                x = i * delta
-                y = f(x)
-                if y <= min_y:
-                    min_y = y
-                    min_x = x
-            return min_x
-    
-        def _get_matrix_product_x_axis(grasp_axis, normal):
-            def matrix_product(theta):
-                R = ParallelJawPtGrasp3D._get_rotation_matrix_y(theta)
-                grasp_axis_rotated = np.dot(R, grasp_axis)
-                return abs(np.dot(normal, grasp_axis_rotated))
-            return matrix_product
-    
-        stable_pose_normal = stable_pose.r[2,:]
-        
-        theta = _argmin(_get_matrix_product_x_axis(np.array([1,0,0]), np.dot(inv(self.unrotated_full_axis), stable_pose_normal)), 0, 2*np.pi, 1000)
-        return theta
 
     def grasp_y_axis_offset(self, theta):
         """ Return a new grasp with the given approach angle.
@@ -660,25 +659,6 @@ class ParallelJawPtGrasp3D(PointGrasp):
         """
         new_grasp = deepcopy(self)
         new_grasp.approach_angle = theta + self.approach_angle
-        return new_grasp
-        
-    def parallel_table(self, stable_pose):
-        """
-        Returns a grasp with approach_angle set to be perpendicular to the table normal specified in the given stable pose.
-
-        Parameters
-        ----------
-        stable_pose : :obj:`StablePose`
-            the pose specifying the table
-
-        Returns
-        -------
-        :obj:`ParallelJawPtGrasp3D`
-            aligned grasp
-        """
-        theta = self._angle_aligned_with_stable_pose(stable_pose)
-        new_grasp = deepcopy(self)
-        new_grasp.approach_angle = theta
         return new_grasp
 
     def _angle_aligned_with_table(self, table_normal):
@@ -705,7 +685,9 @@ class ParallelJawPtGrasp3D(PointGrasp):
                 return np.dot(normal, grasp_axis_rotated)
             return matrix_product
     
-        theta = _argmax(_get_matrix_product_x_axis(np.array([1,0,0]), np.dot(inv(self.unrotated_full_axis), -table_normal)), 0, 2*np.pi, 64)        
+        theta = _argmax(_get_matrix_product_x_axis(np.array([1, 0, 0]),
+                                                   np.dot(inv(self.unrotated_full_axis), -table_normal)),
+                        0, 2*np.pi, 64)
         return theta
 
     def perpendicular_table(self, stable_pose):
@@ -723,9 +705,10 @@ class ParallelJawPtGrasp3D(PointGrasp):
             aligned grasp
         """
         if isinstance(stable_pose, StablePose):
-            table_normal = stable_pose.r[2,:]
+            table_normal = stable_pose.r[2, :]
         else:
-            table_normal = stable_pose.rotation[2,:]
+            table_normal = stable_pose
+
         theta = self._angle_aligned_with_table(table_normal)
         new_grasp = deepcopy(self)
         new_grasp.approach_angle = theta
@@ -741,7 +724,7 @@ class ParallelJawPtGrasp3D(PointGrasp):
         camera_intr : :obj:`perception.CameraIntrinsics`
             intrinsics of the camera to use
         """
-        print("project_camera in dexnet/src/grasping/grasp.py")
+        # print("project_camera in dexnet/src/grasping/grasp.py")
         # compute pose of grasp in camera frame
         T_grasp_camera = T_obj_camera * self.T_grasp_obj
         y_axis_camera = T_grasp_camera.y_axis[:2]

@@ -1,14 +1,11 @@
 import numpy as np
-import json
-import cPickle as pkl
 import argparse
 import gc
-import csv
 import os
 import logging
 
-from meshpy import UniformPlanarWorksurfaceImageRandomVariable, ObjFile, StablePoseFile, RenderMode, SceneObject
-from autolab_core import Point, RigidTransform, YamlConfig
+from meshpy import UniformPlanarWorksurfaceImageRandomVariable, ObjFile, RenderMode, SceneObject
+from autolab_core import RigidTransform, YamlConfig
 from dexnet.learning import TensorDataset
 from dexnet.visualization import DexNetVisualizer3D as vis
 from PIL import Image
@@ -25,12 +22,12 @@ DATA_DIR = '/data'
 table_file = '/data/meshes/table.obj'
 
 data_dir = '/data/meshes/dexnet/'
-output_dir = DATA_DIR + '/TEST/'
+output_dir = DATA_DIR + '/oblique_testset/'
 
-config = YamlConfig('./cfg/tools/generate_gqcnn_dataset.yaml')
+config = YamlConfig('./cfg/tools/generate_oblique_gqcnn_dataset.yaml')
 
-NUM_OBJECTS = 1
-VISUALISE_3D = True
+NUM_OBJECTS = None
+VISUALISE_3D = False
 SAVE_DEPTH_IMAGES = False
 
 
@@ -44,7 +41,6 @@ class GraspInfo(object):
 def _scale_image(depth):
     size = depth.shape
     flattend = depth.flatten()
-    # scaled = np.interp(flattend, (0.5, 0.75), (0, 255), left=0, right=255)
     scaled = np.interp(flattend, (min(flattend), max(flattend)), (0, 255), left=0, right=255)
     integ = scaled.astype(np.uint8)
     integ.resize(size)
@@ -109,7 +105,8 @@ if not os.path.isabs(table_mesh_filename):
 
 dataset_names = target_object_keys.keys()
 datasets = [database.dataset(dn) for dn in dataset_names]
-datasets = [dataset.subset(0, NUM_OBJECTS) for dataset in datasets]
+if NUM_OBJECTS is not None:
+    datasets = [dataset.subset(0, NUM_OBJECTS) for dataset in datasets]
 
 gripper = RobotGripper.load(config['gripper'])
 
@@ -149,6 +146,7 @@ for dataset in datasets:
     object_keys = dataset.object_keys
 
     for obj_key in object_keys:
+        print("Object number: ", cur_obj_label)
         obj = dataset[obj_key]
         grasps = dataset.grasps(obj.key, gripper=gripper.name)
 
@@ -192,21 +190,10 @@ for dataset in datasets:
             for sample in render_samples:
                 T_stp_camera = sample.camera.object_to_camera_pose
                 T_obj_camera = T_stp_camera * T_obj_stp.as_frames('obj', T_stp_camera.from_frame)
-                # T_camera_stp = sample.camera.object_to_camera_pose.inverse()
-                # z_axis_in_stp = np.dot(T_camera_stp.matrix, np.array((0, 0, -1, 1)).reshape(4, 1))
+
                 z_axis_in_obj = np.dot(T_obj_camera.inverse().matrix, np.array((0, 0, -1, 1)).reshape(4, 1))
                 z_axis = z_axis_in_obj[0:3].squeeze() / np.linalg.norm(z_axis_in_obj[0:3].squeeze())
-                # aligned_grasps = [grasp.perpendicular_table(stable_pose) for grasp in grasps]
-                # for grasp in grasps:
-                #     camera_test = grasp.perpendicular_table(z_axis)
-                #     table_test = grasp.perpendicular_table(stable_pose)
-                #     vis.figure()
-                #     T_obj_world = vis.mesh_stable_pose(obj.mesh.trimesh,
-                #                                        stable_pose.T_obj_world, style='surface', dim=0.5)
-                #     T_camera_world = T_obj_world * T_obj_camera.inverse()
-                #     vis.gripper(gripper, camera_test, T_obj_world, color=(0.3, 0.3, 0.3))
-                #     vis.gripper(gripper, table_test, T_obj_world, color=(0.9, 0.9, 0.9))
-                #     vis.show()
+
                 aligned_grasps = [grasp.perpendicular_table(z_axis) for grasp in grasps]
                 # aligned_grasps = [grasp.perpendicular_table(stable_pose) for grasp in grasps]
 
@@ -214,6 +201,14 @@ for dataset in datasets:
                 depth_im_table = sample.renders[RenderMode.DEPTH_SCENE].image
 
                 shifted_camera_intr = sample.camera.camera_intr
+
+                camera_pose = np.r_[sample.camera.radius,
+                                      sample.camera.elev,
+                                      sample.camera.az,
+                                      sample.camera.roll,
+                                      sample.camera.focal,
+                                      sample.camera.tx,
+                                      sample.camera.ty]
 
                 cx = depth_im_table.center[1]
                 cy = depth_im_table.center[0]
@@ -299,6 +294,7 @@ for dataset in datasets:
                     tensor_datapoint['collision_free'] = collision_free
                     tensor_datapoint['pose_labels'] = cur_pose_label
                     tensor_datapoint['image_labels'] = cur_image_label
+                    tensor_datapoint['camera_poses'] = camera_pose
 
                     # Add metrics to tensor dataset
                     for metric_name, metric_val in grasp_metrics[aligned_grasp.id].iteritems():
@@ -306,7 +302,7 @@ for dataset in datasets:
                         tensor_datapoint[metric_name] = coll_free_metric
 
                     tensor_dataset.add(tensor_datapoint)
-                    cur_image_label += 1
+                cur_image_label += 1
             cur_pose_label += 1
             gc.collect()
             # next stable pose

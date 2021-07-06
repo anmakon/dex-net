@@ -117,11 +117,11 @@ class Tensor(object):
             if file_ext != COMPRESSED_TENSOR_EXT:
                 raise ValueError('Can only save compressed tensor with %s extension' %(COMPRESSED_TENSOR_EXT))
             np.savez_compressed(filename,
-                                self.data[:self.cur_index,...])
+                                self.data[:self.cur_index, ...])
         else:
             if file_ext != TENSOR_EXT:
                 raise ValueError('Can only save tensor with .npy extension')
-            np.save(filename, self.data[:self.cur_index,...])
+            np.save(filename, self.data[:self.cur_index, ...])
         return True
 
     @staticmethod
@@ -162,7 +162,7 @@ class TensorDatapoint(object):
 class TensorDataset(object):
     """ Encapsulates learning datasets and different training and test
     splits of the data. """
-    def __init__(self, filename, config, access_mode=WRITE_ACCESS):
+    def __init__(self, filename, config, access_mode=WRITE_ACCESS, initial_tensor=None, initial_datapoint=None):
         # read params
         self._filename = filename
         self._config = config
@@ -197,8 +197,12 @@ class TensorDataset(object):
         # init state variables
         if access_mode == WRITE_ACCESS:
             # init no files
-            self._num_tensors = 0
-            self._num_datapoints = 0
+            if initial_tensor is not None:
+                self._num_tensors = initial_tensor
+                self._num_datapoints = initial_datapoint
+            else:
+                self._num_tensors = 0
+                self._num_datapoints = 0
             if not os.path.exists(self.tensor_dir):
                 os.mkdir(self.tensor_dir)
 
@@ -419,11 +423,31 @@ class TensorDataset(object):
         self._count += 1
         return datapoint
 
+    def get_size(self, obj, seen=None):
+        """Recursively finds size of objects"""
+        size = sys.getsizeof(obj)
+        if seen is None:
+            seen = set()
+        obj_id = id(obj)
+        if obj_id in seen:
+            return 0
+        # Important mark as seen *before* entering recursion to gracefully handle
+        # self-referential objects
+        seen.add(obj_id)
+        if isinstance(obj, dict):
+            size += sum([self.get_size(v, seen) for v in obj.values()])
+            size += sum([self.get_size(k, seen) for k in obj.keys()])
+        elif hasattr(obj, '__dict__'):
+            size += self.get_size(obj.__dict__, seen)
+        elif hasattr(obj, '__iter__') and not isinstance(obj, (str, bytes, bytearray)):
+            size += sum([self.get_size(i, seen) for i in obj])
+        return size
+
     def write(self):
         """ Writes all tensors to the next file number. """
         # write the next file for all fields
         for field_name in self.field_names:
-            filename = self.generate_tensor_filename(field_name, self._num_tensors)
+            filename = self.generate_tensor_filename(field_name, self._num_tensors, compressed=True)
             self._tensors[field_name].save(filename, compressed=True)
             self._tensors[field_name].reset()
         self._num_tensors += 1

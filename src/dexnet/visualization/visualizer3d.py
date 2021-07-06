@@ -70,7 +70,7 @@ class DexNetVisualizer3D(Visualizer3D):
         T_mesh_world = T_gripper_world * gripper.T_mesh_gripper.inverse()        
         T_mesh_world = T_mesh_world.as_frames('obj', 'world')
         Visualizer3D.mesh(gripper.mesh.trimesh, T_mesh_world=T_mesh_world, style='surface', color=color)
-        Visualizer3D.pose(T_mesh_world)
+        Visualizer3D.pose(T_gripper_world)
         if T_camera_world is not None:
             Visualizer3D.pose(T_camera_world)
 
