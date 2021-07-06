@@ -3,6 +3,7 @@ import numpy as np
 RATIO_POS = 1.0
 METRIC_TRESH = 0.002
 DATA_DIR = '/data'
+DATA_DIR = '/home/anna/Grasping/data'
 
 
 class CreateValidationPointers:
